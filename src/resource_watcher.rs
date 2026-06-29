@@ -50,7 +50,11 @@ impl ResourceWatcherHandle {
 
 /// Runs `sinfo --json` and returns parsed partition resources.
 pub(crate) fn fetch_resources() -> Result<Vec<PartitionResources>, Box<dyn std::error::Error>> {
-    let output = Command::new("sinfo").arg("--json").output()?;
+    let output = Command::new("sinfo").arg("--json").output().or_else(|_| {
+        Command::new("/opt/gridview/slurm/bin/sinfo")
+            .arg("--json")
+            .output()
+    })?;
     if !output.status.success() {
         return Err("sinfo --json command failed".into());
     }
