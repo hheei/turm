@@ -46,20 +46,56 @@ impl ResourceWatcherHandle {
     }
 }
 
-// ── JSON parsing ──
+// ── sinfo fetching ──
 
-/// Runs `sinfo --json` and returns parsed partition resources.
+/// Runs `sinfo` and returns parsed partition resources.
+/// Tries `--json` first (Slurm 23.02+), falls back to plain `-o '%P %t' --noheader`.
 pub(crate) fn fetch_resources() -> Result<Vec<PartitionResources>, Box<dyn std::error::Error>> {
-    let output = Command::new("sinfo").arg("--json").output().or_else(|_| {
-        Command::new("/opt/gridview/slurm/bin/sinfo")
-            .arg("--json")
-            .output()
-    })?;
-    if !output.status.success() {
-        return Err("sinfo --json command failed".into());
+    // Try --json first (newer Slurm)
+    if let Ok(output) = Command::new("sinfo").arg("--json").output() {
+        if output.status.success() {
+            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
+                return Ok(parse_sinfo_resources(&value));
+            }
+        }
     }
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-    Ok(parse_sinfo_resources(&value))
+    // Fallback: plain sinfo output (Slurm 20.11 and older)
+    let output = Command::new("sinfo")
+        .args(["-o", "%P %t", "--noheader"])
+        .output()?;
+    if !output.status.success() {
+        return Err("sinfo command failed".into());
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_sinfo_plain(&text))
+}
+
+/// Parse plain `sinfo -o '%P %t' --noheader` output: "partition state" per line.
+pub(crate) fn parse_sinfo_plain(text: &str) -> Vec<PartitionResources> {
+    let mut partition_map: BTreeMap<String, PartitionResources> = BTreeMap::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some((partition, state)) = line.split_once(char::is_whitespace) else {
+            continue;
+        };
+        let state = state.trim();
+        let entry = partition_map
+            .entry(partition.to_string())
+            .or_insert_with(|| PartitionResources {
+                partition: partition.to_string(),
+                running_nodes: 0,
+                available_nodes: 0,
+            });
+        match normalize_node_state(state) {
+            NormalizedNodeState::Running => entry.running_nodes += 1,
+            NormalizedNodeState::Available => entry.available_nodes += 1,
+            NormalizedNodeState::Unavailable => {}
+        }
+    }
+    partition_map.into_values().collect()
 }
 
 /// Parse sinfo JSON into sorted partition resource rows.
@@ -232,5 +268,57 @@ mod tests {
         assert_eq!(resources.len(), 1);
         assert_eq!(resources[0].running_nodes, 1);
         assert_eq!(resources[0].available_nodes, 0);
+    }
+
+    // ── Plain-text parser tests ──
+
+    #[test]
+    fn plain_parser_counts_alloc_as_running() {
+        let text = "debug alloc\ndebug alloc\ndebug idle\n";
+        let resources = parse_sinfo_plain(text);
+        assert_eq!(resources.len(), 1);
+        assert_eq!(resources[0].running_nodes, 2);
+        assert_eq!(resources[0].available_nodes, 1);
+    }
+
+    #[test]
+    fn plain_parser_counts_mix_as_running() {
+        let text = "gpu mix\ngpu alloc\ngpu idle\n";
+        let resources = parse_sinfo_plain(text);
+        assert_eq!(resources.len(), 1);
+        assert_eq!(resources[0].running_nodes, 2);
+        assert_eq!(resources[0].available_nodes, 1);
+    }
+
+    #[test]
+    fn plain_parser_ignores_unknown_states() {
+        let text = "debug down\ndebug drain\ndebug alloc\ndebug idle\n";
+        let resources = parse_sinfo_plain(text);
+        assert_eq!(resources.len(), 1);
+        assert_eq!(resources[0].running_nodes, 1);
+        assert_eq!(resources[0].available_nodes, 1);
+    }
+
+    #[test]
+    fn plain_parser_groups_and_sorts_by_partition() {
+        let text = "gpu alloc\ndebug idle\ncpu mix\ncpu idle\n";
+        let resources = parse_sinfo_plain(text);
+        assert_eq!(resources.len(), 3);
+        assert_eq!(resources[0].partition, "cpu");
+        assert_eq!(resources[0].running_nodes, 1);
+        assert_eq!(resources[0].available_nodes, 1);
+        assert_eq!(resources[1].partition, "debug");
+        assert_eq!(resources[2].partition, "gpu");
+    }
+
+    #[test]
+    fn real_sinfo_integration_diagnostic() {
+        let result = fetch_resources();
+        match &result {
+            Ok(r) => eprintln!("DIAG: fetch_resources OK, {} partitions: {:?}", r.len(), r),
+            Err(e) => eprintln!("DIAG: fetch_resources FAILED: {}", e),
+        }
+        assert!(result.is_ok(), "fetch_resources failed: {:?}", result.err());
+        assert!(!result.unwrap().is_empty(), "resources empty");
     }
 }
