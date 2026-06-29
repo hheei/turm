@@ -48,6 +48,7 @@ fn test_app(job_count: usize, selected: Option<usize>) -> App {
         job_output_offset: 0,
         job_output_wrap: false,
         _job_watcher: JobWatcherHandle {},
+        _resource_watcher: ResourceWatcherHandle {},
         job_output_watcher: FileWatcherHandle::new(app_sender, Duration::from_secs(60)),
         receiver,
         input_receiver,

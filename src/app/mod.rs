@@ -13,6 +13,7 @@ use std::{
 
 use crate::file_watcher::{FileWatcherError, FileWatcherHandle};
 use crate::job_watcher::JobWatcherHandle;
+use crate::resource_watcher::ResourceWatcherHandle;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use ratatui::{
@@ -125,6 +126,7 @@ pub struct App {
     job_output_offset: u16,
     job_output_wrap: bool,
     _job_watcher: JobWatcherHandle,
+    _resource_watcher: ResourceWatcherHandle,
     job_output_watcher: FileWatcherHandle,
     // sender: Sender<AppMessage>,
     receiver: Receiver<AppMessage>,
@@ -143,10 +145,10 @@ pub struct App {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct PartitionResources {
-    partition: String,
-    running_nodes: Option<u32>,
-    available_nodes: Option<u32>,
+pub(crate) struct PartitionResources {
+    pub(crate) partition: String,
+    pub(crate) running_nodes: u32,
+    pub(crate) available_nodes: u32,
 }
 
 pub struct Job {
@@ -247,6 +249,8 @@ fn contains_case_insensitive(haystack: &str, needle: &str) -> bool {
 pub enum AppMessage {
     Jobs(Vec<Job>),
     JobOutput(Result<String, FileWatcherError>),
+    ResourcesUpdated(Vec<PartitionResources>),
+    ResourceWatcherError(#[allow(dead_code)] String),
     Key(KeyEvent),
     MouseClick {
         column: u16,
@@ -291,6 +295,10 @@ impl App {
                 sender.clone(),
                 Duration::from_secs(slurm_refresh_rate),
                 squeue_args,
+            ),
+            _resource_watcher: ResourceWatcherHandle::new(
+                sender.clone(),
+                Duration::from_secs(slurm_refresh_rate),
             ),
             job_list_state: TableState::new(),
             job_sort_field: JobSortField::Time,

@@ -129,6 +129,11 @@ impl App {
                 self.restore_selection_by_job_id(selected_id, fallback_index);
             }
             AppMessage::JobOutput(content) => self.job_output = content,
+            AppMessage::ResourcesUpdated(resources) => {
+                self.resources = resources;
+                self.resource_table_state = TableState::new();
+            }
+            AppMessage::ResourceWatcherError(_) => {} // silently ignore refresh failures
             AppMessage::Key(key) => {
                 if self.dialog.is_some() {
                     let mut close_dialog = false;

@@ -134,8 +134,8 @@ impl App {
                 .map(|r| {
                     Row::new(vec![
                         Cell::from(r.partition.as_str()),
-                        Cell::from(r.running_nodes.map(|n| n.to_string()).unwrap_or_default()),
-                        Cell::from(r.available_nodes.map(|n| n.to_string()).unwrap_or_default()),
+                        Cell::from(r.running_nodes.to_string()),
+                        Cell::from(r.available_nodes.to_string()),
                     ])
                 })
                 .collect()

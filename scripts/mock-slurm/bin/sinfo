@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# mock sinfo --json for turm tests
+# Returns deterministic JSON with 3 partitions and various node states.
+set -euo pipefail
+
+cat <<'EOF'
+{
+  "nodes": [
+    {"partition": "A", "state": "allocated"},
+    {"partition": "A", "state": "allocated"},
+    {"partition": "A", "state": "allocated"},
+    {"partition": "A", "state": "allocated"},
+    {"partition": "A", "state": "allocated"},
+    {"partition": "A", "state": "allocated"},
+    {"partition": "A", "state": "allocated"},
+    {"partition": "A", "state": "allocated"},
+    {"partition": "A", "state": "allocated"},
+    {"partition": "B", "state": "allocated"},
+    {"partition": "B", "state": "allocated"},
+    {"partition": "B", "state": "allocated"},
+    {"partition": "B", "state": "allocated"},
+    {"partition": "B", "state": "allocated"},
+    {"partition": "B", "state": "allocated"},
+    {"partition": "B", "state": "allocated"},
+    {"partition": "B", "state": "allocated"},
+    {"partition": "B", "state": "allocated"},
+    {"partition": "B", "state": "allocated"},
+    {"partition": "B", "state": "mixed"},
+    {"partition": "B", "state": "mixed"},
+    {"partition": "B", "state": "mixed"},
+    {"partition": "B", "state": "mixed"},
+    {"partition": "B", "state": "mixed"},
+    {"partition": "B", "state": "idle"},
+    {"partition": "B", "state": "idle"},
+    {"partition": "B", "state": "idle"},
+    {"partition": "B", "state": "idle"},
+    {"partition": "B", "state": "idle"},
+    {"partition": "B", "state": "idle"},
+    {"partition": "B", "state": "idle"},
+    {"partition": "B", "state": "down"},
+    {"partition": "B", "state": "drain"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "allocated"},
+    {"partition": "C", "state": "idle"}
+  ]
+}
+EOF

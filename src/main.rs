@@ -1,6 +1,7 @@
 mod app;
 mod file_watcher;
 mod job_watcher;
+mod resource_watcher;
 mod squeue_args;
 
 use app::App;
