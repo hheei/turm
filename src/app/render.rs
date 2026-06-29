@@ -2,8 +2,6 @@ use super::*;
 
 impl App {
     pub(super) fn ui(&mut self, f: &mut Frame) {
-        let top_row_height: u16 = 8;
-
         let content_help = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(3), Constraint::Length(1)].as_ref())
@@ -11,7 +9,7 @@ impl App {
 
         let top_bottom = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(top_row_height), Constraint::Min(3)].as_ref())
+            .constraints([Constraint::Min(10), Constraint::Min(3)].as_ref())
             .split(content_help[0]);
 
         let top_row = Layout::default()

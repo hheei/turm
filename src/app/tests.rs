@@ -333,7 +333,7 @@ fn ctrl_t_still_opens_time_limit_dialog() {
 #[test]
 fn selected_job_row_renders_below_header() {
     let mut app = test_app(4, Some(0));
-    let buffer = draw_app(&mut app, 120, 14);
+    let buffer = draw_app(&mut app, 120, 16);
     let header_y = app.job_list_area.y.saturating_add(1);
     let first_row_y = app.job_list_area.y.saturating_add(2);
     let header_text = row_text(&buffer, app.job_list_area, header_y);
