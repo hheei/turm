@@ -107,7 +107,9 @@ impl App {
     }
 
     fn mouse_scroll_target(&self, column: u16, row: u16) -> Option<MouseScrollTarget> {
-        if rect_contains(self.job_list_area, column, row) {
+        if rect_contains(self.resource_area, column, row) {
+            Some(MouseScrollTarget::Resources)
+        } else if rect_contains(self.job_list_area, column, row) {
             Some(MouseScrollTarget::Jobs)
         } else if rect_contains(self.job_output_area, column, row) {
             Some(MouseScrollTarget::Output)
@@ -228,21 +230,25 @@ impl App {
                         KeyCode::Char(']') => self.focus_next_panel(),
                         KeyCode::Char('[') => self.focus_previous_panel(),
                         KeyCode::Char('k') | KeyCode::Up => match self.focus {
+                            Focus::Resources => self.select_previous_resource(),
                             Focus::Jobs => self.select_previous_job(),
                             Focus::Details => {}
                             Focus::Log => self.scroll_job_output_up_by(1),
                         },
                         KeyCode::Char('j') | KeyCode::Down => match self.focus {
+                            Focus::Resources => self.select_next_resource(),
                             Focus::Jobs => self.select_next_job(),
                             Focus::Details => {}
                             Focus::Log => self.scroll_job_output_down_by(1),
                         },
                         KeyCode::Char('g') => match self.focus {
+                            Focus::Resources => self.select_first_resource(),
                             Focus::Jobs => self.select_first_job(),
                             Focus::Details => {}
                             Focus::Log => self.scroll_job_output_to_top(),
                         },
                         KeyCode::Char('G') => match self.focus {
+                            Focus::Resources => self.select_last_resource(),
                             Focus::Jobs => self.select_last_job(),
                             Focus::Details => {}
                             Focus::Log => self.scroll_job_output_to_bottom(),
@@ -270,6 +276,7 @@ impl App {
                                 .contains(crossterm::event::KeyModifiers::CONTROL)
                             {
                                 match self.focus {
+                                    Focus::Resources => {}
                                     Focus::Jobs => self.scroll_jobs_half_page_up(),
                                     Focus::Details => {}
                                     Focus::Log => self.scroll_job_output_half_page_up(),
@@ -355,6 +362,8 @@ impl App {
                         if index < self.visible_job_indices().len() {
                             self.job_list_state.select(Some(index));
                         }
+                    } else if rect_contains(self.resource_area, column, row) {
+                        self.focus = Focus::Resources;
                     } else if rect_contains(self.job_details_area, column, row) {
                         self.focus = Focus::Details;
                     } else if rect_contains(self.job_output_area, column, row) {
@@ -369,6 +378,14 @@ impl App {
             } => {
                 if self.dialog.is_none() {
                     match target {
+                        MouseScrollTarget::Resources => match direction {
+                            MouseWheelDirection::Up => {
+                                self.resource_table_state.scroll_up_by(amount)
+                            }
+                            MouseWheelDirection::Down => {
+                                self.resource_table_state.scroll_down_by(amount)
+                            }
+                        },
                         MouseScrollTarget::Jobs => match direction {
                             MouseWheelDirection::Up => self.job_list_state.scroll_up_by(amount),
                             MouseWheelDirection::Down => self.job_list_state.scroll_down_by(amount),
@@ -434,15 +451,17 @@ impl App {
 
     fn focus_next_panel(&mut self) {
         self.focus = match self.focus {
+            Focus::Resources => Focus::Jobs,
             Focus::Jobs => Focus::Details,
             Focus::Details => Focus::Log,
-            Focus::Log => Focus::Jobs,
+            Focus::Log => Focus::Resources,
         };
     }
 
     fn focus_previous_panel(&mut self) {
         self.focus = match self.focus {
-            Focus::Jobs => Focus::Log,
+            Focus::Resources => Focus::Log,
+            Focus::Jobs => Focus::Resources,
             Focus::Details => Focus::Jobs,
             Focus::Log => Focus::Details,
         };
@@ -469,6 +488,30 @@ impl App {
     fn select_last_job(&mut self) {
         if !self.visible_job_indices().is_empty() {
             self.job_list_state.select_last();
+        }
+    }
+
+    fn select_next_resource(&mut self) {
+        if !self.resources.is_empty() {
+            self.resource_table_state.select_next();
+        }
+    }
+
+    fn select_previous_resource(&mut self) {
+        if !self.resources.is_empty() {
+            self.resource_table_state.select_previous();
+        }
+    }
+
+    fn select_first_resource(&mut self) {
+        if !self.resources.is_empty() {
+            self.resource_table_state.select_first();
+        }
+    }
+
+    fn select_last_resource(&mut self) {
+        if !self.resources.is_empty() {
+            self.resource_table_state.select_last();
         }
     }
 

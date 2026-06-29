@@ -31,6 +31,7 @@ use tui_input::{Input, backend::crossterm::EventHandler};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Focus {
+    Resources,
     Jobs,
     Details,
     Log,
@@ -135,6 +136,17 @@ pub struct App {
     job_output_area: Rect,
     pending_input_event: Option<Event>,
     pending_clipboard_copy: Option<String>,
+    resource_table_state: TableState,
+    resource_list_height: u16,
+    resource_area: Rect,
+    resources: Vec<PartitionResources>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PartitionResources {
+    partition: String,
+    running_nodes: Option<u32>,
+    available_nodes: Option<u32>,
 }
 
 pub struct Job {
@@ -255,6 +267,7 @@ pub(crate) enum MouseWheelDirection {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MouseScrollTarget {
+    Resources,
     Jobs,
     Output,
 }
@@ -301,6 +314,10 @@ impl App {
             job_output_area: Rect::default(),
             pending_input_event: None,
             pending_clipboard_copy: None,
+            resource_table_state: TableState::new(),
+            resource_list_height: 0,
+            resource_area: Rect::default(),
+            resources: Vec::new(),
         }
     }
 }

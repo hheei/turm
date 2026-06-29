@@ -2,21 +2,27 @@ use super::*;
 
 impl App {
     pub(super) fn ui(&mut self, f: &mut Frame) {
+        let top_row_height: u16 = 8;
+
         let content_help = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(3), Constraint::Length(1)].as_ref())
             .split(f.area());
 
-        let master_detail = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        let top_bottom = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(top_row_height), Constraint::Min(3)].as_ref())
             .split(content_help[0]);
 
-        let job_detail_log = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(8), Constraint::Min(3)].as_ref())
-            .split(master_detail[1]);
+        let top_row = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+            .split(top_bottom[0]);
 
+        let bottom_row = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+            .split(top_bottom[1]);
         let help_options = match &self.dialog {
             Some(Dialog::FilterJobs { .. }) => vec![
                 ("mode", "filter"),
@@ -31,6 +37,13 @@ impl App {
                 ("esc", "cancel"),
             ],
             _ => match self.focus {
+                Focus::Resources => vec![
+                    ("mode", "resources"),
+                    ("[/]", "focus"),
+                    ("j/k", "move"),
+                    ("g/G", "top/bottom"),
+                    ("q", "quit"),
+                ],
                 Focus::Jobs => vec![
                     ("[/]", "focus"),
                     ("f", "filter"),
@@ -82,6 +95,81 @@ impl App {
         let help = Paragraph::new(help);
         f.render_widget(help, content_help[1]);
 
+        // ── Resources panel ──
+        let resources_block = Block::default()
+            .title("─Resources (nodes)")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(panel_border_style(
+                self.dialog.as_ref(),
+                self.focus,
+                Focus::Resources,
+            ));
+        let resource_header = Row::new(vec![
+            Cell::from(Line::from(vec![
+                Span::styled("P", Style::default().add_modifier(Modifier::UNDERLINED)),
+                Span::raw("artition"),
+            ])),
+            Cell::from(Line::from(vec![
+                Span::styled("R", Style::default().add_modifier(Modifier::UNDERLINED)),
+                Span::raw("unning"),
+            ])),
+            Cell::from(Line::from(vec![
+                Span::styled("A", Style::default().add_modifier(Modifier::UNDERLINED)),
+                Span::raw("vailable"),
+            ])),
+        ]);
+        let resource_rows: Vec<Row> = if self.resources.is_empty() {
+            vec![Row::new(vec![
+                Cell::from(""),
+                Cell::from(Line::from(Span::styled(
+                    "No resource data",
+                    Style::default().add_modifier(Modifier::DIM),
+                ))),
+                Cell::from(""),
+            ])]
+        } else {
+            self.resources
+                .iter()
+                .map(|r| {
+                    Row::new(vec![
+                        Cell::from(r.partition.as_str()),
+                        Cell::from(r.running_nodes.map(|n| n.to_string()).unwrap_or_default()),
+                        Cell::from(r.available_nodes.map(|n| n.to_string()).unwrap_or_default()),
+                    ])
+                })
+                .collect()
+        };
+        let resource_widths = [Constraint::Min(10), Constraint::Min(8), Constraint::Min(10)];
+        let resource_table = Table::new(resource_rows, resource_widths)
+            .header(resource_header)
+            .block(resources_block)
+            .column_spacing(1)
+            .row_highlight_style(Style::default().bg(Color::Green).fg(Color::Black));
+        f.render_stateful_widget(resource_table, top_row[0], &mut self.resource_table_state);
+        self.resource_list_height = top_row[0].height.saturating_sub(3);
+        self.resource_area = top_row[0];
+
+        // Resources scrollbar
+        let resource_viewport_height = usize::from(self.resource_list_height);
+        let resource_content_height = self.resources.len().max(1); // always at least placeholder row
+        if resource_viewport_height > 0 && resource_content_height > resource_viewport_height {
+            let mut scrollbar_state = ScrollbarState::new(resource_content_height)
+                .position(self.resource_table_state.offset())
+                .viewport_content_length(resource_viewport_height);
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(Some("▲"))
+                .end_symbol(Some("▼"));
+
+            let scrollbar_area = Rect::new(
+                self.resource_area.x.saturating_add(1),
+                self.resource_area.y.saturating_add(2),
+                self.resource_area.width.saturating_sub(2),
+                self.resource_list_height,
+            );
+            f.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
+        }
+
         let visible_job_indices = self.visible_job_indices();
         let visible_jobs = visible_job_indices
             .iter()
@@ -103,7 +191,7 @@ impl App {
             .unwrap_or(0);
         let jobs_block = Block::default()
             .title(jobs_title(
-                master_detail[0].width,
+                bottom_row[0].width,
                 visible_job_indices.len(),
                 self.jobs.len(),
                 &self.active_filter,
@@ -192,9 +280,9 @@ impl App {
             .block(jobs_block)
             .column_spacing(1)
             .row_highlight_style(Style::default().bg(Color::Green).fg(Color::Black));
-        f.render_stateful_widget(job_table, master_detail[0], &mut self.job_list_state);
-        self.job_list_height = master_detail[0].height.saturating_sub(3);
-        self.job_list_area = master_detail[0];
+        f.render_stateful_widget(job_table, bottom_row[0], &mut self.job_list_state);
+        self.job_list_height = bottom_row[0].height.saturating_sub(3);
+        self.job_list_area = bottom_row[0];
 
         let job_list_viewport_height = usize::from(self.job_list_height);
         let job_list_content_height = visible_job_indices.len();
@@ -288,10 +376,10 @@ impl App {
                     Focus::Details,
                 )),
         );
-        f.render_widget(job_detail, job_detail_log[0]);
-        self.job_details_area = job_detail_log[0];
+        f.render_widget(job_detail, top_row[1]);
+        self.job_details_area = top_row[1];
 
-        let log_area = job_detail_log[1];
+        let log_area = bottom_row[1];
         self.job_output_area = log_area;
         let log_title = Line::from(vec![
             Span::raw("─"),

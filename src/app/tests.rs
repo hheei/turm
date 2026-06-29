@@ -58,6 +58,10 @@ fn test_app(job_count: usize, selected: Option<usize>) -> App {
         job_output_area: Rect::default(),
         pending_input_event: None,
         pending_clipboard_copy: None,
+        resource_table_state: TableState::new(),
+        resource_list_height: 0,
+        resource_area: Rect::default(),
+        resources: Vec::new(),
     }
 }
 
@@ -328,7 +332,7 @@ fn ctrl_t_still_opens_time_limit_dialog() {
 #[test]
 fn selected_job_row_renders_below_header() {
     let mut app = test_app(4, Some(0));
-    let buffer = draw_app(&mut app, 120, 12);
+    let buffer = draw_app(&mut app, 120, 14);
     let header_y = app.job_list_area.y.saturating_add(1);
     let first_row_y = app.job_list_area.y.saturating_add(2);
     let header_text = row_text(&buffer, app.job_list_area, header_y);
@@ -347,11 +351,11 @@ fn selected_job_row_renders_below_header() {
 #[test]
 fn jobs_scrollbar_threshold_uses_only_body_rows() {
     let mut measuring_app = test_app(0, None);
-    let _ = draw_app(&mut measuring_app, 120, 12);
+    let _ = draw_app(&mut measuring_app, 120, 20);
     let visible_body_rows = usize::from(measuring_app.job_list_height);
 
     let mut app_without_overflow = test_app(visible_body_rows, Some(0));
-    let buffer_without_overflow = draw_app(&mut app_without_overflow, 120, 12);
+    let buffer_without_overflow = draw_app(&mut app_without_overflow, 120, 20);
     let symbols_without_overflow = jobs_area_symbols(
         &buffer_without_overflow,
         app_without_overflow.job_list_rows_area(),
@@ -360,7 +364,7 @@ fn jobs_scrollbar_threshold_uses_only_body_rows() {
     assert!(!symbols_without_overflow.iter().any(|symbol| symbol == "▼"));
 
     let mut app_with_overflow = test_app(visible_body_rows.saturating_add(1), Some(0));
-    let buffer_with_overflow = draw_app(&mut app_with_overflow, 120, 12);
+    let buffer_with_overflow = draw_app(&mut app_with_overflow, 120, 20);
     let symbols_with_overflow = jobs_area_symbols(
         &buffer_with_overflow,
         app_with_overflow.job_list_rows_area(),
@@ -373,7 +377,7 @@ fn jobs_scrollbar_threshold_uses_only_body_rows() {
 #[test]
 fn jobs_half_page_up_uses_body_row_height() {
     let mut app = test_app(30, Some(20));
-    let _ = draw_app(&mut app, 120, 12);
+    let _ = draw_app(&mut app, 120, 20);
     let body_rows = app.job_list_height;
     let start = 20usize;
 
@@ -387,19 +391,18 @@ fn jobs_half_page_up_uses_body_row_height() {
 #[test]
 fn jobs_scrollbar_thumb_tracks_the_table_offset() {
     let mut app_at_top = test_app(30, Some(0));
-    let buffer_at_top = draw_app(&mut app_at_top, 120, 12);
+    let buffer_at_top = draw_app(&mut app_at_top, 120, 20);
     let thumb_top_at_top =
         scrollbar_thumb_top(&buffer_at_top, app_at_top.job_list_rows_area()).unwrap();
 
     let mut app_scrolled = test_app(30, Some(20));
-    let buffer_scrolled = draw_app(&mut app_scrolled, 120, 12);
+    let buffer_scrolled = draw_app(&mut app_scrolled, 120, 20);
     let thumb_top_scrolled =
         scrollbar_thumb_top(&buffer_scrolled, app_scrolled.job_list_rows_area()).unwrap();
 
     assert!(app_scrolled.job_list_state.offset() > app_at_top.job_list_state.offset());
     assert!(thumb_top_scrolled > thumb_top_at_top);
 }
-
 #[test]
 fn test_chunked_string() {
     let input = "abcdefghij";
@@ -645,7 +648,7 @@ fn bracket_keys_cycle_focus_forward_and_backward() {
     assert_eq!(app.focus, Focus::Log);
 
     app.handle(AppMessage::Key(key(']')));
-    assert_eq!(app.focus, Focus::Jobs);
+    assert_eq!(app.focus, Focus::Resources);
 
     app.handle(AppMessage::Key(key('[')));
     assert_eq!(app.focus, Focus::Log);
@@ -790,11 +793,10 @@ fn help_line_reflects_the_active_focus() {
 
     jobs_app = copyable_jobs_app();
     jobs_app.handle(AppMessage::Key(key('c')));
-    let copy_text = buffer_text(&draw_app(&mut jobs_app, 120, 12), 120, 12);
+    let copy_text = buffer_text(&draw_app(&mut jobs_app, 120, 20), 120, 20);
     assert!(copy_text.contains("mode: copy"));
     assert!(copy_text.contains("c: dir-url"));
     assert!(copy_text.contains("d: dir-name"));
-
     let mut details_app = test_app(3, Some(0));
     details_app.focus = Focus::Details;
     let details_text = buffer_text(&draw_app(&mut details_app, 120, 12), 120, 12);
@@ -1060,4 +1062,98 @@ fn ctrl_d_in_filter_dialog_does_not_open_cancel_popup() {
     )));
 
     assert!(matches!(app.dialog, Some(Dialog::FilterJobs { .. })));
+}
+
+// ── Resources panel tests ──
+
+#[test]
+fn resources_panel_renders_title_and_headers() {
+    let mut app = test_app(3, Some(0));
+    let buffer = draw_app(&mut app, 120, 20);
+    let text = buffer_text(&buffer, 120, 20);
+    assert!(text.contains("Resources (nodes)"));
+    assert!(text.contains("Partition"));
+    assert!(text.contains("Running"));
+    assert!(text.contains("Available"));
+    assert!(!text.contains("Pending"));
+}
+
+#[test]
+fn resources_panel_shows_empty_state_when_no_data() {
+    let mut app = test_app(3, Some(0));
+    let buffer = draw_app(&mut app, 120, 20);
+    let text = buffer_text(&buffer, 120, 20);
+    assert!(text.contains("No resource"), "text was:\n{text}");
+}
+
+#[test]
+fn focus_cycles_include_resources_panel() {
+    let mut app = test_app(3, Some(0));
+
+    // Default is Jobs
+    assert_eq!(app.focus, Focus::Jobs);
+
+    // Jobs -> Resources (via [)
+    app.handle(AppMessage::Key(key('[')));
+    assert_eq!(app.focus, Focus::Resources);
+
+    // Resources -> Log (via [)
+    app.handle(AppMessage::Key(key('[')));
+    assert_eq!(app.focus, Focus::Log);
+
+    // Log -> Details (via [)
+    app.handle(AppMessage::Key(key('[')));
+    assert_eq!(app.focus, Focus::Details);
+
+    // Details -> Jobs (via [)
+    app.handle(AppMessage::Key(key('[')));
+    assert_eq!(app.focus, Focus::Jobs);
+
+    // Jobs -> Details (via ])
+    app.handle(AppMessage::Key(key(']')));
+    assert_eq!(app.focus, Focus::Details);
+
+    // Details -> Log (via ])
+    app.handle(AppMessage::Key(key(']')));
+    assert_eq!(app.focus, Focus::Log);
+
+    // Log -> Resources (via ])
+    app.handle(AppMessage::Key(key(']')));
+    assert_eq!(app.focus, Focus::Resources);
+
+    // Resources -> Jobs (via ])
+    app.handle(AppMessage::Key(key(']')));
+    assert_eq!(app.focus, Focus::Jobs);
+}
+
+#[test]
+fn resources_scrollbar_hidden_when_rows_fit() {
+    let mut app = test_app(3, Some(0));
+    let buffer = draw_app(&mut app, 120, 20);
+    let symbols = jobs_area_symbols(&buffer, app.resource_area);
+    // With empty resources (1 placeholder row), row fits in 8-height panel
+    assert!(!symbols.iter().any(|s| s == "▲"));
+    assert!(!symbols.iter().any(|s| s == "▼"));
+}
+
+#[test]
+fn help_line_shows_resources_mode_when_focused() {
+    let mut app = test_app(3, Some(0));
+    app.focus = Focus::Resources;
+    let text = buffer_text(&draw_app(&mut app, 120, 20), 120, 20);
+    assert!(text.contains("mode: resources"));
+    assert!(text.contains("j/k"));
+    assert!(text.contains("g/G"));
+}
+
+#[test]
+fn resources_panel_uses_top_left_area() {
+    let mut app = test_app(3, Some(0));
+    let _ = draw_app(&mut app, 100, 20);
+    // Resources is top-left, same width as Jobs
+    assert_eq!(app.resource_area.x, 0);
+    assert_eq!(app.resource_area.y, 0);
+    assert_eq!(app.resource_area.width, app.job_list_area.width);
+    // Resources height equals Details height
+    assert_eq!(app.resource_area.height, app.job_details_area.height);
 }
