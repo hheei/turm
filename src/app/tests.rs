@@ -41,8 +41,8 @@ fn test_app(job_count: usize, selected: Option<usize>) -> App {
         jobs: (0..job_count).map(test_job).collect(),
         active_filter: String::new(),
         job_list_state: TableState::new().with_selected(selected),
-        job_sort_field: JobSortField::Id,
-        job_sort_direction: SortDirection::Desc,
+        job_sort_field: JobSortField::Time,
+        job_sort_direction: SortDirection::Asc,
         job_output: Ok(String::new()),
         job_output_anchor: ScrollAnchor::Bottom,
         job_output_offset: 0,
@@ -268,7 +268,7 @@ fn header_renders_active_sort_indicator() {
     let buffer = draw_app(&mut app, 120, 12);
     let header_y = app.job_list_area.y.saturating_add(1);
     let header_text = row_text(&buffer, app.job_list_area, header_y);
-    assert!(header_text.contains("id▼"), "header was {header_text}");
+    assert!(header_text.contains("time▲"), "header was {header_text}");
 
     app.handle(AppMessage::Key(key('n')));
     app.handle(AppMessage::Key(key('n')));
@@ -288,6 +288,8 @@ fn sorting_job_ids_is_numeric() {
     jobs[2].array_id = "99".to_string();
 
     let mut app = app_with_jobs(jobs, Some(0));
+    app.job_sort_field = JobSortField::Id;
+    app.job_sort_direction = SortDirection::Desc;
     app.sort_jobs();
 
     assert_eq!(
@@ -464,7 +466,7 @@ fn filter_dialog_accepts_q_without_quitting_or_sorting() {
     let (should_quit, should_draw) = app.handle_input_event(Event::Key(key('q')));
     assert!(!should_quit);
     assert!(should_draw);
-    assert_eq!(app.job_sort_field, JobSortField::Id);
+    assert_eq!(app.job_sort_field, JobSortField::Time);
 
     match app.dialog.as_ref() {
         Some(Dialog::FilterJobs { input }) => assert_eq!(input.value(), "q"),
@@ -478,7 +480,7 @@ fn typing_enter_esc_and_clear_work_in_filter_dialog() {
 
     open_filter(&mut app);
     app.handle(AppMessage::Key(key('n')));
-    assert_eq!(app.job_sort_field, JobSortField::Id);
+    assert_eq!(app.job_sort_field, JobSortField::Time);
 
     type_in_filter(&mut app, "ame:vasp");
     app.handle(AppMessage::Key(key_with_modifiers(
