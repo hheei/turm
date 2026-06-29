@@ -130,7 +130,12 @@ impl App {
             }
             AppMessage::JobOutput(content) => self.job_output = content,
             AppMessage::ResourcesUpdated(resources) => {
+                let old_offset = self.resource_table_state.offset();
                 self.resources = resources;
+                // Clamp offset if new data is shorter
+                if old_offset > 0 && old_offset >= self.resources.len().saturating_sub(1) {
+                    self.resource_table_state = TableState::new();
+                }
             }
             AppMessage::ResourceWatcherError(_) => {} // silently ignore refresh failures
             AppMessage::Key(key) => {
