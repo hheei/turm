@@ -131,7 +131,6 @@ impl App {
             AppMessage::JobOutput(content) => self.job_output = content,
             AppMessage::ResourcesUpdated(resources) => {
                 self.resources = resources;
-                self.resource_table_state = TableState::new();
             }
             AppMessage::ResourceWatcherError(_) => {} // silently ignore refresh failures
             AppMessage::Key(key) => {

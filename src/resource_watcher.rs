@@ -49,28 +49,39 @@ impl ResourceWatcherHandle {
 // ── sinfo fetching ──
 
 /// Runs `sinfo` and returns parsed partition resources.
-/// Tries `--json` first (Slurm 23.02+), falls back to plain `-o '%P %t' --noheader`.
+/// Tries `--json` first (Slurm 23.02+), falls back to plain format.
 pub(crate) fn fetch_resources() -> Result<Vec<PartitionResources>, Box<dyn std::error::Error>> {
     // Try --json first (newer Slurm)
     if let Ok(output) = Command::new("sinfo").arg("--json").output() {
         if output.status.success() {
             if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
-                return Ok(parse_sinfo_resources(&value));
+                return Ok(sort_resources(parse_sinfo_resources(&value)));
             }
         }
     }
     // Fallback: plain sinfo output (Slurm 20.11 and older)
     let output = Command::new("sinfo")
-        .args(["-o", "%P %t", "--noheader"])
+        .args(["-o", "%P %t %D", "--noheader"])
         .output()?;
     if !output.status.success() {
         return Err("sinfo command failed".into());
     }
     let text = String::from_utf8_lossy(&output.stdout);
-    Ok(parse_sinfo_plain(&text))
+    Ok(sort_resources(parse_sinfo_plain(&text)))
 }
 
-/// Parse plain `sinfo -o '%P %t' --noheader` output: "partition state" per line.
+/// Sort resources: Available descending, then partition name ascending.
+fn sort_resources(mut resources: Vec<PartitionResources>) -> Vec<PartitionResources> {
+    resources.sort_by(|a, b| {
+        b.available_nodes
+            .cmp(&a.available_nodes)
+            .then(a.partition.cmp(&b.partition))
+    });
+    resources
+}
+
+/// Parse plain `sinfo -o '%P %t %D' --noheader` output.
+/// Format: "partition state count" per line, e.g. "debug alloc 3".
 pub(crate) fn parse_sinfo_plain(text: &str) -> Vec<PartitionResources> {
     let mut partition_map: BTreeMap<String, PartitionResources> = BTreeMap::new();
     for line in text.lines() {
@@ -78,10 +89,12 @@ pub(crate) fn parse_sinfo_plain(text: &str) -> Vec<PartitionResources> {
         if line.is_empty() {
             continue;
         }
-        let Some((partition, state)) = line.split_once(char::is_whitespace) else {
+        let mut parts = line.split_whitespace();
+        let Some(partition) = parts.next() else {
             continue;
         };
-        let state = state.trim();
+        let Some(state) = parts.next() else { continue };
+        let count: u32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(1);
         let entry = partition_map
             .entry(partition.to_string())
             .or_insert_with(|| PartitionResources {
@@ -90,8 +103,8 @@ pub(crate) fn parse_sinfo_plain(text: &str) -> Vec<PartitionResources> {
                 available_nodes: 0,
             });
         match normalize_node_state(state) {
-            NormalizedNodeState::Running => entry.running_nodes += 1,
-            NormalizedNodeState::Available => entry.available_nodes += 1,
+            NormalizedNodeState::Running => entry.running_nodes += count,
+            NormalizedNodeState::Available => entry.available_nodes += count,
             NormalizedNodeState::Unavailable => {}
         }
     }
@@ -273,17 +286,35 @@ mod tests {
     // ── Plain-text parser tests ──
 
     #[test]
-    fn plain_parser_counts_alloc_as_running() {
-        let text = "debug alloc\ndebug alloc\ndebug idle\n";
+    fn plain_parser_counts_with_node_count_field() {
+        let text = "debug alloc 3\ndebug idle 2\n";
         let resources = parse_sinfo_plain(text);
         assert_eq!(resources.len(), 1);
-        assert_eq!(resources[0].running_nodes, 2);
-        assert_eq!(resources[0].available_nodes, 1);
+        assert_eq!(resources[0].running_nodes, 3);
+        assert_eq!(resources[0].available_nodes, 2);
     }
 
     #[test]
     fn plain_parser_counts_mix_as_running() {
-        let text = "gpu mix\ngpu alloc\ngpu idle\n";
+        let text = "gpu mix 2\ngpu alloc 1\ngpu idle 4\n";
+        let resources = parse_sinfo_plain(text);
+        assert_eq!(resources.len(), 1);
+        assert_eq!(resources[0].running_nodes, 3);
+        assert_eq!(resources[0].available_nodes, 4);
+    }
+
+    #[test]
+    fn plain_parser_defaults_to_1_when_count_missing() {
+        let text = "debug alloc\ndebug idle\n";
+        let resources = parse_sinfo_plain(text);
+        assert_eq!(resources.len(), 1);
+        assert_eq!(resources[0].running_nodes, 1);
+        assert_eq!(resources[0].available_nodes, 1);
+    }
+
+    #[test]
+    fn plain_parser_ignores_unavailable_states() {
+        let text = "debug down 5\ndebug drain 3\ndebug alloc 2\ndebug idle 1\n";
         let resources = parse_sinfo_plain(text);
         assert_eq!(resources.len(), 1);
         assert_eq!(resources[0].running_nodes, 2);
@@ -291,24 +322,41 @@ mod tests {
     }
 
     #[test]
-    fn plain_parser_ignores_unknown_states() {
-        let text = "debug down\ndebug drain\ndebug alloc\ndebug idle\n";
+    fn plain_parser_groups_by_partition() {
+        let text = "gpu alloc 1\ndebug idle 2\ncpu mix 3\ncpu idle 4\n";
         let resources = parse_sinfo_plain(text);
-        assert_eq!(resources.len(), 1);
-        assert_eq!(resources[0].running_nodes, 1);
-        assert_eq!(resources[0].available_nodes, 1);
+        assert_eq!(resources.len(), 3);
+        // BTreeMap sorts by key: cpu < debug < gpu (before sort_resources)
+        assert_eq!(resources[0].partition, "cpu");
+        assert_eq!(resources[0].running_nodes, 3);
+        assert_eq!(resources[0].available_nodes, 4);
     }
 
     #[test]
-    fn plain_parser_groups_and_sorts_by_partition() {
-        let text = "gpu alloc\ndebug idle\ncpu mix\ncpu idle\n";
-        let resources = parse_sinfo_plain(text);
-        assert_eq!(resources.len(), 3);
-        assert_eq!(resources[0].partition, "cpu");
-        assert_eq!(resources[0].running_nodes, 1);
-        assert_eq!(resources[0].available_nodes, 1);
-        assert_eq!(resources[1].partition, "debug");
-        assert_eq!(resources[2].partition, "gpu");
+    fn sort_resources_orders_by_available_desc_then_partition() {
+        let resources = sort_resources(vec![
+            PartitionResources {
+                partition: "A".into(),
+                running_nodes: 1,
+                available_nodes: 5,
+            },
+            PartitionResources {
+                partition: "B".into(),
+                running_nodes: 2,
+                available_nodes: 10,
+            },
+            PartitionResources {
+                partition: "C".into(),
+                running_nodes: 3,
+                available_nodes: 0,
+            },
+        ]);
+        assert_eq!(resources[0].partition, "B");
+        assert_eq!(resources[0].available_nodes, 10);
+        assert_eq!(resources[1].partition, "A");
+        assert_eq!(resources[1].available_nodes, 5);
+        assert_eq!(resources[2].partition, "C");
+        assert_eq!(resources[2].available_nodes, 0);
     }
 
     #[test]

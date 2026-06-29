@@ -106,18 +106,9 @@ impl App {
                 Focus::Resources,
             ));
         let resource_header = Row::new(vec![
-            Cell::from(Line::from(vec![
-                Span::styled("P", Style::default().add_modifier(Modifier::UNDERLINED)),
-                Span::raw("artition"),
-            ])),
-            Cell::from(Line::from(vec![
-                Span::styled("R", Style::default().add_modifier(Modifier::UNDERLINED)),
-                Span::raw("unning"),
-            ])),
-            Cell::from(Line::from(vec![
-                Span::styled("A", Style::default().add_modifier(Modifier::UNDERLINED)),
-                Span::raw("vailable"),
-            ])),
+            Cell::from("Partition"),
+            Cell::from("Running"),
+            Cell::from("Available"),
         ]);
         let resource_rows: Vec<Row> = if self.resources.is_empty() {
             vec![Row::new(vec![
