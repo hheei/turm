@@ -57,6 +57,7 @@ fn test_app(job_count: usize, selected: Option<usize>) -> App {
         job_details_area: Rect::default(),
         job_output_area: Rect::default(),
         pending_input_event: None,
+        pending_clipboard_copy: None,
     }
 }
 
@@ -173,6 +174,26 @@ fn special_key(code: KeyCode) -> KeyEvent {
 
 fn key_with_modifiers(char_key: char, modifiers: crossterm::event::KeyModifiers) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(char_key), modifiers)
+}
+
+fn filtered_jobs_app() -> App {
+    let mut app = app_with_jobs(filter_test_jobs(), Some(0));
+    app.apply_job_filter("id:101512");
+    app
+}
+
+fn copyable_jobs_app() -> App {
+    let mut app = filtered_jobs_app();
+    app.jobs[0].stdout = Some(PathBuf::from("/scratch/chlo/vasp-alpha/stdout.log"));
+    app.jobs[0].stderr = Some(PathBuf::from("/scratch/chlo/vasp-alpha/stderr.log"));
+    app
+}
+
+fn copyable_jobs_app_with_output_path(path: &str) -> App {
+    let mut app = filtered_jobs_app();
+    app.jobs[0].stdout = Some(PathBuf::from(path));
+    app.jobs[0].stderr = Some(PathBuf::from(path));
+    app
 }
 
 fn details_area(app: &App) -> Rect {
@@ -348,19 +369,17 @@ fn jobs_scrollbar_threshold_uses_only_body_rows() {
 }
 
 #[test]
-fn jobs_half_page_scroll_uses_body_row_height() {
-    let mut app = test_app(30, Some(0));
+fn jobs_half_page_up_uses_body_row_height() {
+    let mut app = test_app(30, Some(20));
     let _ = draw_app(&mut app, 120, 12);
     let body_rows = app.job_list_height;
-
-    app.scroll_jobs_half_page_down();
-    assert_eq!(
-        app.job_list_state.selected(),
-        Some((body_rows / 2) as usize)
-    );
+    let start = 20usize;
 
     app.scroll_jobs_half_page_up();
-    assert_eq!(app.job_list_state.selected(), Some(0));
+    assert_eq!(
+        app.job_list_state.selected(),
+        Some(start.saturating_sub((body_rows / 2) as usize))
+    );
 }
 
 #[test]
@@ -692,10 +711,7 @@ fn log_focus_routes_navigation_to_log_scrolling() {
     assert_eq!(app.job_list_state.selected(), Some(2));
     assert_eq!(app.job_output_offset, 1);
 
-    app.handle(AppMessage::Key(key_with_modifiers(
-        'd',
-        crossterm::event::KeyModifiers::CONTROL,
-    )));
+    app.handle(AppMessage::Key(special_key(KeyCode::PageDown)));
     assert!(app.job_output_offset > 1);
 
     app.handle(AppMessage::Key(key('G')));
@@ -764,18 +780,30 @@ fn focused_border_style_tracks_the_active_panel() {
 fn help_line_reflects_the_active_focus() {
     let mut jobs_app = test_app(3, Some(0));
     let jobs_text = buffer_text(&draw_app(&mut jobs_app, 120, 12), 120, 12);
-    assert!(jobs_text.contains("mode: jobs"));
-    assert!(jobs_text.contains("f: filter"));
+    assert!(!jobs_text.contains("mode: jobs"));
+    assert!(jobs_text.contains("c: copy"));
+    assert!(jobs_text.contains("^d: cancel"));
+    assert!(!jobs_text.contains("s/p/i/n/u/t: sort"));
+    assert!(!jobs_text.contains("j/k: move"));
+
+    jobs_app = copyable_jobs_app();
+    jobs_app.handle(AppMessage::Key(key('c')));
+    let copy_text = buffer_text(&draw_app(&mut jobs_app, 120, 12), 120, 12);
+    assert!(copy_text.contains("mode: copy"));
+    assert!(copy_text.contains("c: dir-url"));
+    assert!(copy_text.contains("d: dir-name"));
 
     let mut details_app = test_app(3, Some(0));
     details_app.focus = Focus::Details;
     let details_text = buffer_text(&draw_app(&mut details_app, 120, 12), 120, 12);
     assert!(details_text.contains("mode: details"));
+    assert!(details_text.contains("^d: cancel"));
 
     let mut log_app = test_app(3, Some(0));
     log_app.focus = Focus::Log;
     let log_text = buffer_text(&draw_app(&mut log_app, 120, 12), 120, 12);
     assert!(log_text.contains("mode: log"));
+    assert!(log_text.contains("^d: cancel"));
     assert!(log_text.contains("w: wrap"));
 }
 
@@ -838,4 +866,196 @@ fn dialog_blocks_mouse_focus_changes() {
     assert!(!should_quit);
     assert!(!should_draw);
     assert_eq!(app.focus, Focus::Jobs);
+}
+
+#[test]
+fn ctrl_d_in_jobs_focus_opens_cancel_confirmation_popup() {
+    let mut app = filtered_jobs_app();
+
+    app.handle(AppMessage::Key(key_with_modifiers(
+        'd',
+        crossterm::event::KeyModifiers::CONTROL,
+    )));
+
+    match app.dialog.as_ref() {
+        Some(Dialog::ConfirmCancelJob {
+            id, name, signal, ..
+        }) => {
+            assert_eq!(id, "101512");
+            assert_eq!(name, "vasp-alpha");
+            assert_eq!(*signal, None);
+        }
+        _ => panic!("expected confirm cancel dialog"),
+    }
+}
+
+#[test]
+fn ctrl_d_in_details_focus_opens_cancel_popup() {
+    let mut app = filtered_jobs_app();
+    app.focus = Focus::Details;
+
+    app.handle(AppMessage::Key(key_with_modifiers(
+        'd',
+        crossterm::event::KeyModifiers::CONTROL,
+    )));
+
+    assert!(matches!(app.dialog, Some(Dialog::ConfirmCancelJob { .. })));
+}
+
+#[test]
+fn ctrl_d_in_log_focus_opens_cancel_popup() {
+    let mut app = filtered_jobs_app();
+    app.focus = Focus::Log;
+    app.job_output_anchor = ScrollAnchor::Top;
+    app.job_output_offset = 3;
+
+    app.handle(AppMessage::Key(key_with_modifiers(
+        'd',
+        crossterm::event::KeyModifiers::CONTROL,
+    )));
+
+    assert_eq!(app.job_output_offset, 3);
+    assert!(matches!(app.dialog, Some(Dialog::ConfirmCancelJob { .. })));
+}
+
+#[test]
+fn c_opens_copy_popup_and_uppercase_c_stays_unbound() {
+    let mut app = copyable_jobs_app();
+
+    app.handle(AppMessage::Key(key('c')));
+    assert!(matches!(
+        app.dialog,
+        Some(Dialog::CopyJobOutputDirectory { .. })
+    ));
+
+    app.dialog = None;
+    app.handle(AppMessage::Key(key('C')));
+    assert!(app.dialog.is_none());
+}
+
+#[test]
+fn copy_popup_renders_directory_actions() {
+    let mut app = copyable_jobs_app();
+    app.handle(AppMessage::Key(key('c')));
+
+    let text = buffer_text(&draw_app(&mut app, 120, 20), 120, 20);
+    assert!(text.contains("Copy:"));
+    assert!(text.contains("copy dir url"));
+    assert!(text.contains("/scratch/chlo/vasp-alpha"));
+    assert!(text.contains("copy directory name"));
+    assert!(text.contains("vasp-alpha"));
+}
+
+#[test]
+fn copy_popup_copies_directory_url_with_c() {
+    let mut app = copyable_jobs_app();
+    app.handle(AppMessage::Key(key('c')));
+    app.handle(AppMessage::Key(key('c')));
+
+    assert!(app.dialog.is_none());
+    assert_eq!(
+        app.pending_clipboard_copy.as_deref(),
+        Some("/scratch/chlo/vasp-alpha")
+    );
+}
+
+#[test]
+fn copy_popup_preserves_special_characters_in_directory_path() {
+    let mut app = copyable_jobs_app_with_output_path(
+        "/scratch/chlo/vasp+alpha %beta#gamma?delta&epsilon/stdout.log",
+    );
+    app.handle(AppMessage::Key(key('c')));
+    app.handle(AppMessage::Key(key('c')));
+
+    assert!(app.dialog.is_none());
+    assert_eq!(
+        app.pending_clipboard_copy.as_deref(),
+        Some("/scratch/chlo/vasp+alpha %beta#gamma?delta&epsilon")
+    );
+}
+
+#[test]
+fn copy_popup_copies_directory_name_with_d() {
+    let mut app = copyable_jobs_app();
+    app.handle(AppMessage::Key(key('c')));
+    app.handle(AppMessage::Key(key('d')));
+
+    assert!(app.dialog.is_none());
+    assert_eq!(app.pending_clipboard_copy.as_deref(), Some("vasp-alpha"));
+}
+
+#[test]
+fn copy_popup_ignores_plain_d_until_opened() {
+    let mut app = copyable_jobs_app();
+    app.handle(AppMessage::Key(key('d')));
+
+    assert!(app.dialog.is_none());
+    assert!(app.pending_clipboard_copy.is_none());
+}
+
+#[test]
+fn cancel_confirmation_popup_renders_job_details_and_buttons() {
+    let mut app = filtered_jobs_app();
+    app.handle(AppMessage::Key(key_with_modifiers(
+        'd',
+        crossterm::event::KeyModifiers::CONTROL,
+    )));
+
+    let text = buffer_text(&draw_app(&mut app, 120, 20), 120, 20);
+    assert!(text.contains("Cancel selected job?"));
+    assert!(text.contains("Job 101512"));
+    assert!(text.contains("vasp-alpha"));
+    assert!(text.contains("[Y]es"));
+    assert!(text.contains("(N)o"));
+}
+
+#[test]
+fn cancel_confirmation_accepts_safe_close_keys() {
+    for key_event in [key('n'), key('N'), special_key(KeyCode::Esc)] {
+        let mut app = filtered_jobs_app();
+        app.handle(AppMessage::Key(key_with_modifiers(
+            'd',
+            crossterm::event::KeyModifiers::CONTROL,
+        )));
+
+        app.handle(AppMessage::Key(key_event));
+        assert!(app.dialog.is_none());
+    }
+}
+
+#[test]
+fn cancel_confirmation_maps_yes_keys_without_running_scancel() {
+    use super::events::{CancelConfirmationAction, cancel_confirmation_action};
+
+    for key_event in [key('y'), key('Y'), special_key(KeyCode::Enter)] {
+        assert_eq!(
+            cancel_confirmation_action(key_event),
+            CancelConfirmationAction::Confirm
+        );
+    }
+}
+
+#[test]
+fn ctrl_d_with_no_selected_job_does_not_panic_or_open_dialog() {
+    let mut app = test_app(0, None);
+
+    app.handle(AppMessage::Key(key_with_modifiers(
+        'd',
+        crossterm::event::KeyModifiers::CONTROL,
+    )));
+
+    assert!(app.dialog.is_none());
+}
+
+#[test]
+fn ctrl_d_in_filter_dialog_does_not_open_cancel_popup() {
+    let mut app = filtered_jobs_app();
+    open_filter(&mut app);
+
+    app.handle(AppMessage::Key(key_with_modifiers(
+        'd',
+        crossterm::event::KeyModifiers::CONTROL,
+    )));
+
+    assert!(matches!(app.dialog, Some(Dialog::FilterJobs { .. })));
 }

@@ -37,11 +37,27 @@ pub enum Focus {
 }
 
 pub enum Dialog {
-    ConfirmCancelJob(String),
-    SelectCancelSignal { id: String, selected_signal: usize },
-    EditTimeLimit { id: String, input: Input },
-    FilterJobs { input: Input },
-    CommandError { command: String, output: String },
+    ConfirmCancelJob {
+        id: String,
+        name: String,
+        details: Vec<String>,
+        signal: Option<String>,
+    },
+    EditTimeLimit {
+        id: String,
+        input: Input,
+    },
+    FilterJobs {
+        input: Input,
+    },
+    CopyJobOutputDirectory {
+        dir_url: String,
+        dir_name: String,
+    },
+    CommandError {
+        command: String,
+        output: String,
+    },
 }
 
 struct CommandFailure {
@@ -55,7 +71,7 @@ pub enum ScrollAnchor {
     Bottom,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub enum OutputFileView {
     #[default]
     Stdout,
@@ -118,6 +134,7 @@ pub struct App {
     job_details_area: Rect,
     job_output_area: Rect,
     pending_input_event: Option<Event>,
+    pending_clipboard_copy: Option<String>,
 }
 
 pub struct Job {
@@ -242,7 +259,6 @@ pub(crate) enum MouseScrollTarget {
     Output,
 }
 
-const SCANCEL_SIGNALS: &[&str] = &["TERM", "INT", "HUP", "USR1", "USR2", "STOP", "CONT", "KILL"];
 const DIALOG_WIDTH: u16 = 80;
 
 impl App {
@@ -284,6 +300,7 @@ impl App {
             job_details_area: Rect::default(),
             job_output_area: Rect::default(),
             pending_input_event: None,
+            pending_clipboard_copy: None,
         }
     }
 }

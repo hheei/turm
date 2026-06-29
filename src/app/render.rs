@@ -17,38 +17,48 @@ impl App {
             .constraints([Constraint::Length(8), Constraint::Min(3)].as_ref())
             .split(master_detail[1]);
 
-        let help_options = if matches!(self.dialog, Some(Dialog::FilterJobs { .. })) {
-            vec![
+        let help_options = match &self.dialog {
+            Some(Dialog::FilterJobs { .. }) => vec![
                 ("mode", "filter"),
                 ("enter", "apply"),
                 ("esc", "cancel"),
                 ("ctrl+u", "clear"),
-            ]
-        } else {
-            match self.focus {
+            ],
+            Some(Dialog::CopyJobOutputDirectory { .. }) => vec![
+                ("mode", "copy"),
+                ("c", "dir-url"),
+                ("d", "dir-name"),
+                ("esc", "cancel"),
+            ],
+            _ => match self.focus {
                 Focus::Jobs => vec![
-                    ("mode", "jobs"),
                     ("[/]", "focus"),
                     ("f", "filter"),
-                    ("s/p/i/n/u/t", "sort"),
-                    ("j/k", "move"),
-                    ("c", "cancel"),
+                    ("c", "copy"),
+                    ("^d", "cancel"),
                     ("q", "quit"),
                 ],
-                Focus::Details => vec![("mode", "details"), ("[/]", "focus"), ("q", "quit")],
+                Focus::Details => vec![
+                    ("mode", "details"),
+                    ("[/]", "focus"),
+                    ("^d", "cancel"),
+                    ("q", "quit"),
+                ],
                 Focus::Log => vec![
                     ("mode", "log"),
                     ("[/]", "focus"),
+                    ("^d", "cancel"),
                     ("j/k", "scroll"),
                     ("g/G", "top/bottom"),
                     ("o", "output"),
                     ("w", "wrap"),
                     ("q", "quit"),
                 ],
-            }
+            },
         };
         let blue_style = Style::default().fg(Color::Blue);
         let light_blue_style = Style::default().fg(Color::LightBlue);
+        let white_style = Style::default().fg(Color::White);
 
         let help = Line::from(help_options.iter().fold(
             Vec::new(),
@@ -56,7 +66,13 @@ impl App {
                 if !acc.is_empty() {
                     acc.push(Span::raw(" | "));
                 }
-                acc.push(Span::styled(*key, blue_style));
+                if *key == "[/]" {
+                    acc.push(Span::styled("[", blue_style));
+                    acc.push(Span::styled("/", white_style));
+                    acc.push(Span::styled("]", blue_style));
+                } else {
+                    acc.push(Span::styled(*key, blue_style));
+                }
                 acc.push(Span::raw(": "));
                 acc.push(Span::styled(*description, light_blue_style));
                 acc
@@ -321,67 +337,82 @@ impl App {
 
         if let Some(dialog) = &self.dialog {
             match dialog {
-                Dialog::ConfirmCancelJob(id) => {
-                    let dialog = Paragraph::new(Line::from(vec![
-                        Span::raw("Cancel job "),
-                        Span::styled(id, Style::default().add_modifier(Modifier::BOLD)),
-                        Span::raw("?"),
-                    ]))
-                    .style(Style::default().fg(Color::White))
-                    .wrap(Wrap { trim: true })
-                    .block(
-                        Block::default()
-                            .title("─Cancel")
-                            .borders(Borders::ALL)
-                            .border_type(BorderType::Rounded)
-                            .style(Style::default().fg(Color::Green)),
-                    );
-
-                    let area = centered_dialog_area(DIALOG_WIDTH, 3, f.area());
-                    f.render_widget(Clear, area);
-                    f.render_widget(dialog, area);
-                }
-                Dialog::SelectCancelSignal {
-                    id,
-                    selected_signal,
-                } => {
-                    let mut rows = vec![
+                Dialog::CopyJobOutputDirectory { dir_url, dir_name } => {
+                    let popup_width = min(f.area().width.saturating_sub(4).max(36), 72);
+                    let content_width = popup_width.saturating_sub(4) as usize;
+                    let rows = vec![
                         Line::from(vec![
-                            Span::raw("Send signal to job "),
-                            Span::styled(id, Style::default().add_modifier(Modifier::BOLD)),
-                            Span::raw(":"),
+                            Span::styled("[c]", Style::default().fg(Color::Yellow)),
+                            Span::raw(" copy dir url"),
                         ]),
+                        Line::from(Span::raw(truncate_with_ellipsis(dir_url, content_width))),
                         Line::default(),
-                    ];
-                    rows.extend(SCANCEL_SIGNALS.iter().enumerate().map(|(i, signal)| {
-                        let signal_style = if i == *selected_signal {
-                            Style::default().fg(Color::Black).bg(Color::Green)
-                        } else {
-                            Style::default()
-                        };
-                        let shortcut_style = signal_style.add_modifier(Modifier::DIM);
                         Line::from(vec![
-                            Span::styled(format!("{}. ", i + 1), shortcut_style),
-                            Span::styled(*signal, signal_style),
-                        ])
-                    }));
+                            Span::styled("[d]", Style::default().fg(Color::Yellow)),
+                            Span::raw(" copy directory name"),
+                        ]),
+                        Line::from(Span::raw(truncate_with_ellipsis(dir_name, content_width))),
+                    ];
+                    let popup_height = rows.len().saturating_add(2).min(u16::MAX as usize) as u16;
 
                     let dialog = Paragraph::new(Text::from(rows))
                         .style(Style::default().fg(Color::White))
-                        .wrap(Wrap { trim: true })
                         .block(
                             Block::default()
-                                .title("─Signal")
+                                .title("Copy:")
                                 .borders(Borders::ALL)
                                 .border_type(BorderType::Rounded)
                                 .style(Style::default().fg(Color::Green)),
                         );
 
-                    let area = centered_dialog_area(
-                        DIALOG_WIDTH,
-                        SCANCEL_SIGNALS.len() as u16 + 4,
-                        f.area(),
-                    );
+                    let area = centered_dialog_area(popup_width, popup_height, f.area());
+                    f.render_widget(Clear, area);
+                    f.render_widget(dialog, area);
+                }
+                Dialog::ConfirmCancelJob {
+                    id, name, details, ..
+                } => {
+                    let popup_width = min(f.area().width.saturating_sub(4).max(36), 60);
+                    let content_width = popup_width.saturating_sub(4) as usize;
+                    let title = truncate_with_ellipsis("Cancel selected job?", content_width);
+                    let mut rows = vec![
+                        Line::from(Span::styled(
+                            truncate_with_ellipsis(&format!("Job {id}"), content_width),
+                            Style::default().add_modifier(Modifier::BOLD),
+                        )),
+                        Line::from(Span::raw(truncate_with_ellipsis(name, content_width))),
+                    ];
+                    rows.extend(details.iter().map(|detail| {
+                        Line::from(Span::raw(truncate_with_ellipsis(detail, content_width)))
+                    }));
+                    rows.push(Line::default());
+                    rows.push(Line::from(Span::styled(
+                        "─".repeat(content_width),
+                        Style::default().add_modifier(Modifier::DIM),
+                    )));
+                    rows.push(Line::from(vec![
+                        Span::raw("            "),
+                        Span::styled("[Y]es", Style::default().fg(Color::Black).bg(Color::Green)),
+                        Span::raw("                 "),
+                        Span::styled("(N)o", Style::default().fg(Color::White)),
+                    ]));
+                    let popup_height = rows.len().saturating_add(2).min(u16::MAX as usize) as u16;
+
+                    let dialog = Paragraph::new(Text::from(rows))
+                        .style(Style::default().fg(Color::White))
+                        .block(
+                            Block::default()
+                                .title(Line::from(Span::styled(
+                                    title,
+                                    Style::default().add_modifier(Modifier::BOLD),
+                                )))
+                                .title_alignment(ratatui::layout::Alignment::Center)
+                                .borders(Borders::ALL)
+                                .border_type(BorderType::Rounded)
+                                .style(Style::default().fg(Color::Green)),
+                        );
+
+                    let area = centered_dialog_area(popup_width, popup_height, f.area());
                     f.render_widget(Clear, area);
                     f.render_widget(dialog, area);
                 }

@@ -29,6 +29,7 @@ impl App {
             if should_draw {
                 terminal.draw(|f| self.ui(f))?;
             }
+            self.flush_pending_clipboard_copy()?;
         }
     }
 
@@ -132,49 +133,22 @@ impl App {
                     let mut scancel_request = None;
                     let mut timelimit_request = None;
                     let mut filter_to_apply = None;
+                    let mut clipboard_copy = None;
                     let mut command_failure = None;
 
                     match self.dialog.as_mut().expect("dialog must exist") {
-                        Dialog::ConfirmCancelJob(id) => match key.code {
-                            KeyCode::Enter | KeyCode::Char('y') => {
-                                scancel_request = Some((id.clone(), None));
-                                close_dialog = true;
-                            }
-                            KeyCode::Esc => {
-                                close_dialog = true;
-                            }
-                            _ => {}
-                        },
-                        Dialog::SelectCancelSignal {
-                            id,
-                            selected_signal,
-                        } => match key.code {
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                *selected_signal = selected_signal.saturating_sub(1);
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                *selected_signal = min(
-                                    selected_signal.saturating_add(1),
-                                    SCANCEL_SIGNALS.len().saturating_sub(1),
-                                );
-                            }
-                            KeyCode::Enter => {
-                                scancel_request =
-                                    Some((id.clone(), Some(SCANCEL_SIGNALS[*selected_signal])));
-                                close_dialog = true;
-                            }
-                            KeyCode::Esc => {
-                                close_dialog = true;
-                            }
-                            KeyCode::Char(c) if c.is_ascii_digit() => {
-                                if let Some(index) = signal_index_for_digit(c) {
-                                    if index < SCANCEL_SIGNALS.len() {
-                                        *selected_signal = index;
-                                    }
+                        Dialog::ConfirmCancelJob { id, signal, .. } => {
+                            match cancel_confirmation_action(key) {
+                                CancelConfirmationAction::Confirm => {
+                                    scancel_request = Some((id.clone(), signal.as_deref()));
+                                    close_dialog = true;
                                 }
+                                CancelConfirmationAction::Cancel => {
+                                    close_dialog = true;
+                                }
+                                CancelConfirmationAction::Ignore => {}
                             }
-                            _ => {}
-                        },
+                        }
                         Dialog::EditTimeLimit { id, input } => match key.code {
                             KeyCode::Enter => {
                                 if let Some(time_limit) = validated_time_limit(input) {
@@ -208,6 +182,22 @@ impl App {
                                 input.handle_event(&Event::Key(key));
                             }
                         },
+                        Dialog::CopyJobOutputDirectory { dir_url, dir_name } => {
+                            match copy_job_output_directory_action(key) {
+                                CopyJobOutputDirectoryAction::CopyDirUrl => {
+                                    clipboard_copy = Some(dir_url.clone());
+                                    close_dialog = true;
+                                }
+                                CopyJobOutputDirectoryAction::CopyDirName => {
+                                    clipboard_copy = Some(dir_name.clone());
+                                    close_dialog = true;
+                                }
+                                CopyJobOutputDirectoryAction::Cancel => {
+                                    close_dialog = true;
+                                }
+                                CopyJobOutputDirectoryAction::Ignore => {}
+                            }
+                        }
                         Dialog::CommandError { .. } => match key.code {
                             KeyCode::Enter | KeyCode::Esc => {
                                 close_dialog = true;
@@ -224,6 +214,9 @@ impl App {
                     }
                     if let Some(filter) = filter_to_apply {
                         self.apply_job_filter(&filter);
+                    }
+                    if let Some(copy_value) = clipboard_copy {
+                        self.pending_clipboard_copy = Some(copy_value);
                     }
                     if let Some(CommandFailure { command, output }) = command_failure {
                         self.dialog = Some(Dialog::CommandError { command, output });
@@ -290,11 +283,7 @@ impl App {
                                 .modifiers
                                 .contains(crossterm::event::KeyModifiers::CONTROL)
                             {
-                                match self.focus {
-                                    Focus::Jobs => self.scroll_jobs_half_page_down(),
-                                    Focus::Details => {}
-                                    Focus::Log => self.scroll_job_output_half_page_down(),
-                                }
+                                self.dialog = self.cancel_confirmation_dialog();
                             }
                         }
                         KeyCode::PageDown if matches!(self.focus, Focus::Log) => {
@@ -328,18 +317,9 @@ impl App {
                             self.scroll_job_output_to_bottom();
                         }
                         KeyCode::Char('c') if matches!(self.focus, Focus::Jobs) => {
-                            if let Some(id) = self.selected_job_id() {
-                                self.dialog = Some(Dialog::ConfirmCancelJob(id));
-                            }
+                            self.dialog = self.copy_job_output_directory_dialog();
                         }
-                        KeyCode::Char('C') if matches!(self.focus, Focus::Jobs) => {
-                            if let Some(id) = self.selected_job_id() {
-                                self.dialog = Some(Dialog::SelectCancelSignal {
-                                    id,
-                                    selected_signal: 0,
-                                });
-                            }
-                        }
+                        KeyCode::Char('C') if matches!(self.focus, Focus::Jobs) => {}
                         KeyCode::Char('t') if matches!(self.focus, Focus::Jobs) => {
                             if key
                                 .modifiers
@@ -424,6 +404,34 @@ impl App {
         self.selected_job().map(Job::id)
     }
 
+    fn flush_pending_clipboard_copy(&mut self) -> io::Result<()> {
+        if let Some(value) = self.pending_clipboard_copy.take() {
+            write_osc52_clipboard(&value)?;
+        }
+
+        Ok(())
+    }
+
+    fn copy_job_output_directory_dialog(&self) -> Option<Dialog> {
+        let directory = self
+            .selected_job()
+            .and_then(|job| preferred_output_path(job, self.output_file_view))
+            .and_then(|path| path.parent())?;
+        let (dir_url, dir_name) = copy_job_output_directory_value(directory)?;
+
+        Some(Dialog::CopyJobOutputDirectory { dir_url, dir_name })
+    }
+
+    fn cancel_confirmation_dialog(&self) -> Option<Dialog> {
+        let job = self.selected_job()?;
+        Some(Dialog::ConfirmCancelJob {
+            id: job.id(),
+            name: job.name.clone(),
+            details: selected_job_cancel_details(job),
+            signal: None,
+        })
+    }
+
     fn focus_next_panel(&mut self) {
         self.focus = match self.focus {
             Focus::Jobs => Focus::Details,
@@ -464,12 +472,6 @@ impl App {
         }
     }
 
-    pub(super) fn scroll_jobs_half_page_down(&mut self) {
-        if !self.visible_job_indices().is_empty() {
-            self.job_list_state.scroll_down_by(self.job_list_height / 2);
-        }
-    }
-
     pub(super) fn scroll_jobs_half_page_up(&mut self) {
         if !self.visible_job_indices().is_empty() {
             self.job_list_state.scroll_up_by(self.job_list_height / 2);
@@ -498,10 +500,6 @@ impl App {
         let row_in_list = (row - rows_area.y) as usize;
         let index = self.job_list_state.offset().saturating_add(row_in_list);
         (index < visible_job_indices.len()).then_some(index)
-    }
-
-    fn scroll_job_output_half_page_down(&mut self) {
-        self.scroll_job_output_down_by(self.job_output_page_step());
     }
 
     fn scroll_job_output_half_page_up(&mut self) {
@@ -564,7 +562,133 @@ fn mouse_wheel_direction(kind: MouseEventKind) -> Option<MouseWheelDirection> {
     }
 }
 
-fn signal_index_for_digit(digit: char) -> Option<usize> {
-    let value = digit.to_digit(10)? as usize;
-    if value == 0 { None } else { Some(value - 1) }
+fn selected_job_cancel_details(job: &Job) -> Vec<String> {
+    let mut details = Vec::new();
+    let location = preferred_output_path(job, OutputFileView::Stdout)
+        .and_then(|path| path.parent())
+        .map(|path| path.to_string_lossy().to_string())
+        .filter(|value| !value.is_empty());
+
+    if let Some(location) = location {
+        details.push(location);
+    } else if !job.command.trim().is_empty() {
+        details.push(job.command.clone());
+    }
+
+    if !job.user.trim().is_empty() || !job.partition.trim().is_empty() {
+        details.push(format!(
+            "{}{}{}",
+            if job.user.trim().is_empty() {
+                ""
+            } else {
+                &job.user
+            },
+            if job.user.trim().is_empty() || job.partition.trim().is_empty() {
+                ""
+            } else {
+                " • "
+            },
+            if job.partition.trim().is_empty() {
+                ""
+            } else {
+                &job.partition
+            }
+        ));
+    }
+
+    details
+}
+
+fn preferred_output_path(job: &Job, view: OutputFileView) -> Option<&PathBuf> {
+    match view {
+        OutputFileView::Stdout => job.stdout.as_ref().or(job.stderr.as_ref()),
+        OutputFileView::Stderr => job.stderr.as_ref().or(job.stdout.as_ref()),
+    }
+}
+
+fn copy_job_output_directory_value(path: &std::path::Path) -> Option<(String, String)> {
+    let dir_path = path.to_string_lossy().to_string();
+    let dir_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| dir_path.clone());
+
+    if dir_path.is_empty() || dir_name.is_empty() {
+        None
+    } else {
+        Some((dir_path, dir_name))
+    }
+}
+
+fn write_osc52_clipboard(value: &str) -> io::Result<()> {
+    use std::io::Write;
+
+    let mut stdout = io::stdout();
+    write!(stdout, "\x1b]52;c;{}\x07", base64_encode(value.as_bytes()))?;
+    stdout.flush()
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    let mut index = 0;
+    while index < bytes.len() {
+        let remaining = bytes.len() - index;
+        let first = bytes[index];
+        let second = if remaining > 1 { bytes[index + 1] } else { 0 };
+        let third = if remaining > 2 { bytes[index + 2] } else { 0 };
+        let chunk = ((first as u32) << 16) | ((second as u32) << 8) | third as u32;
+
+        encoded.push(ALPHABET[((chunk >> 18) & 0x3F) as usize] as char);
+        encoded.push(ALPHABET[((chunk >> 12) & 0x3F) as usize] as char);
+        encoded.push(if remaining > 1 {
+            ALPHABET[((chunk >> 6) & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+        encoded.push(if remaining > 2 {
+            ALPHABET[(chunk & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+        index += 3;
+    }
+
+    encoded
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CancelConfirmationAction {
+    Confirm,
+    Cancel,
+    Ignore,
+}
+
+pub(super) fn cancel_confirmation_action(key: KeyEvent) -> CancelConfirmationAction {
+    match key.code {
+        KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+            CancelConfirmationAction::Confirm
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => CancelConfirmationAction::Cancel,
+        _ => CancelConfirmationAction::Ignore,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CopyJobOutputDirectoryAction {
+    CopyDirUrl,
+    CopyDirName,
+    Cancel,
+    Ignore,
+}
+
+pub(super) fn copy_job_output_directory_action(key: KeyEvent) -> CopyJobOutputDirectoryAction {
+    match key.code {
+        KeyCode::Char('c') => CopyJobOutputDirectoryAction::CopyDirUrl,
+        KeyCode::Char('d') => CopyJobOutputDirectoryAction::CopyDirName,
+        KeyCode::Esc => CopyJobOutputDirectoryAction::Cancel,
+        _ => CopyJobOutputDirectoryAction::Ignore,
+    }
 }
