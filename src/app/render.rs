@@ -2,6 +2,9 @@ use super::*;
 
 impl App {
     pub(super) fn ui(&mut self, f: &mut Frame) {
+        let top_panel_height = (f.area().height.saturating_mul(40) / 100).min(12);
+        let top_content_height = top_panel_height.saturating_sub(2).max(4); // at least 4 content rows
+
         let content_help = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(3), Constraint::Length(1)].as_ref())
@@ -9,7 +12,7 @@ impl App {
 
         let top_bottom = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(10), Constraint::Min(3)].as_ref())
+            .constraints([Constraint::Length(top_content_height), Constraint::Min(3)].as_ref())
             .split(content_help[0]);
 
         let top_row = Layout::default()
