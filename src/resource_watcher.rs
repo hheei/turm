@@ -49,7 +49,7 @@ impl ResourceWatcherHandle {
 // ── JSON parsing ──
 
 /// Runs `sinfo --json` and returns parsed partition resources.
-fn fetch_resources() -> Result<Vec<PartitionResources>, Box<dyn std::error::Error>> {
+pub(crate) fn fetch_resources() -> Result<Vec<PartitionResources>, Box<dyn std::error::Error>> {
     let output = Command::new("sinfo").arg("--json").output()?;
     if !output.status.success() {
         return Err("sinfo --json command failed".into());

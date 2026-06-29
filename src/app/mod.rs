@@ -13,7 +13,7 @@ use std::{
 
 use crate::file_watcher::{FileWatcherError, FileWatcherHandle};
 use crate::job_watcher::JobWatcherHandle;
-use crate::resource_watcher::ResourceWatcherHandle;
+use crate::resource_watcher::{ResourceWatcherHandle, fetch_resources};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use ratatui::{
@@ -325,7 +325,7 @@ impl App {
             resource_table_state: TableState::new(),
             resource_list_height: 0,
             resource_area: Rect::default(),
-            resources: Vec::new(),
+            resources: fetch_resources().unwrap_or_default(),
         }
     }
 }
