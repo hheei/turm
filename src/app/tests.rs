@@ -1,6 +1,6 @@
-use super::*;
 use super::commands::validated_time_limit;
 use super::render::chunked_string;
+use super::*;
 use crossbeam::channel::unbounded;
 use ratatui::{
     Terminal,
@@ -39,6 +39,7 @@ fn test_app(job_count: usize, selected: Option<usize>) -> App {
         focus: Focus::Jobs,
         dialog: None,
         jobs: (0..job_count).map(test_job).collect(),
+        active_filter: String::new(),
         job_list_state: TableState::new().with_selected(selected),
         job_sort_field: JobSortField::Id,
         job_sort_direction: SortDirection::Desc,
@@ -53,6 +54,7 @@ fn test_app(job_count: usize, selected: Option<usize>) -> App {
         output_file_view: OutputFileView::default(),
         job_list_height: 0,
         job_list_area: Rect::default(),
+        job_details_area: Rect::default(),
         job_output_area: Rect::default(),
         pending_input_event: None,
     }
@@ -92,6 +94,72 @@ fn app_with_jobs(jobs: Vec<Job>, selected: Option<usize>) -> App {
     app
 }
 
+fn visible_job_ids(app: &App) -> Vec<String> {
+    app.visible_job_indices()
+        .into_iter()
+        .map(|index| app.jobs[index].id())
+        .collect()
+}
+
+fn ids(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| (*value).to_string()).collect()
+}
+
+fn buffer_text(buffer: &Buffer, width: u16, height: u16) -> String {
+    (0..height)
+        .map(|y| {
+            (0..width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn filter_test_jobs() -> Vec<Job> {
+    let mut alpha = test_job(0);
+    alpha.job_id = "101512".to_string();
+    alpha.array_id = "101512".to_string();
+    alpha.name = "vasp-alpha".to_string();
+    alpha.user = "chlo".to_string();
+    alpha.partition = "gpu".to_string();
+    alpha.state = "RUNNING".to_string();
+    alpha.state_compact = "R".to_string();
+    alpha.time = "7:00".to_string();
+
+    let mut beta = test_job(1);
+    beta.job_id = "202000".to_string();
+    beta.array_id = "202000".to_string();
+    beta.name = "relax-beta".to_string();
+    beta.user = "alex".to_string();
+    beta.partition = "debug".to_string();
+    beta.state = "PENDING".to_string();
+    beta.state_compact = "PD".to_string();
+    beta.time = "00:10:00".to_string();
+
+    let mut gamma = test_job(2);
+    gamma.job_id = "303333".to_string();
+    gamma.array_id = "303333".to_string();
+    gamma.name = "analysis-gamma".to_string();
+    gamma.user = "chlo".to_string();
+    gamma.partition = "cpu".to_string();
+    gamma.state = "COMPLETED".to_string();
+    gamma.state_compact = "CG".to_string();
+    gamma.time = "01:23:00".to_string();
+
+    vec![alpha, beta, gamma]
+}
+
+fn open_filter(app: &mut App) {
+    app.handle(AppMessage::Key(key('f')));
+}
+
+fn type_in_filter(app: &mut App, value: &str) {
+    for ch in value.chars() {
+        app.handle(AppMessage::Key(key(ch)));
+    }
+}
+
 fn key(char_key: char) -> KeyEvent {
     KeyEvent::new(
         KeyCode::Char(char_key),
@@ -99,8 +167,20 @@ fn key(char_key: char) -> KeyEvent {
     )
 }
 
+fn special_key(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, crossterm::event::KeyModifiers::NONE)
+}
+
 fn key_with_modifiers(char_key: char, modifiers: crossterm::event::KeyModifiers) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(char_key), modifiers)
+}
+
+fn details_area(app: &App) -> Rect {
+    app.job_details_area
+}
+
+fn border_fg(buffer: &Buffer, area: Rect) -> Option<Color> {
+    buffer[(area.x, area.y)].style().fg
 }
 
 #[test]
@@ -342,4 +422,420 @@ fn test_validated_time_limit() {
         validated_time_limit(&Input::new(" 01:00:00 ".to_string())),
         Some("01:00:00".to_string())
     );
+}
+
+#[test]
+fn f_opens_filter_dialog_with_active_filter_draft() {
+    let mut app = test_app(2, Some(0));
+    app.active_filter = "name:vasp".to_string();
+
+    open_filter(&mut app);
+
+    match app.dialog.as_ref() {
+        Some(Dialog::FilterJobs { input }) => assert_eq!(input.value(), "name:vasp"),
+        _ => panic!("expected filter dialog"),
+    }
+}
+
+#[test]
+fn filter_dialog_accepts_q_without_quitting_or_sorting() {
+    let mut app = test_app(3, Some(0));
+    open_filter(&mut app);
+
+    let (should_quit, should_draw) = app.handle_input_event(Event::Key(key('q')));
+    assert!(!should_quit);
+    assert!(should_draw);
+    assert_eq!(app.job_sort_field, JobSortField::Id);
+
+    match app.dialog.as_ref() {
+        Some(Dialog::FilterJobs { input }) => assert_eq!(input.value(), "q"),
+        _ => panic!("expected filter dialog"),
+    }
+}
+
+#[test]
+fn typing_enter_esc_and_clear_work_in_filter_dialog() {
+    let mut app = app_with_jobs(filter_test_jobs(), Some(0));
+
+    open_filter(&mut app);
+    app.handle(AppMessage::Key(key('n')));
+    assert_eq!(app.job_sort_field, JobSortField::Id);
+
+    type_in_filter(&mut app, "ame:vasp");
+    app.handle(AppMessage::Key(key_with_modifiers(
+        'u',
+        crossterm::event::KeyModifiers::CONTROL,
+    )));
+    match app.dialog.as_ref() {
+        Some(Dialog::FilterJobs { input }) => assert_eq!(input.value(), ""),
+        _ => panic!("expected filter dialog"),
+    }
+
+    type_in_filter(&mut app, "name:vasp");
+    app.handle(AppMessage::Key(KeyEvent::new(
+        KeyCode::Enter,
+        crossterm::event::KeyModifiers::NONE,
+    )));
+    assert!(app.dialog.is_none());
+    assert_eq!(app.active_filter, "name:vasp");
+    assert_eq!(visible_job_ids(&app), ids(&["101512"]));
+
+    open_filter(&mut app);
+    type_in_filter(&mut app, "-edited");
+    app.handle(AppMessage::Key(KeyEvent::new(
+        KeyCode::Esc,
+        crossterm::event::KeyModifiers::NONE,
+    )));
+    assert!(app.dialog.is_none());
+    assert_eq!(app.active_filter, "name:vasp");
+}
+
+#[test]
+fn free_text_filter_matches_visible_job_fields() {
+    let expectations: [(&str, &[&str]); 6] = [
+        ("vasp", &["101512"]),
+        ("gpu", &["101512"]),
+        ("chlo", &["101512", "303333"]),
+        ("PD", &["202000"]),
+        ("7:00", &["101512"]),
+        ("101512", &["101512"]),
+    ];
+
+    for (query, expected) in expectations {
+        let mut app = app_with_jobs(filter_test_jobs(), Some(0));
+        app.apply_job_filter(query);
+        assert_eq!(visible_job_ids(&app), ids(expected), "query {query}");
+    }
+}
+
+#[test]
+fn field_filters_match_expected_columns() {
+    let expectations: [(&str, &[&str]); 10] = [
+        ("job:101512", &["101512"]),
+        ("job:vasp", &["101512"]),
+        ("id:202000", &["202000"]),
+        ("name:analysis", &["303333"]),
+        ("user:alex", &["202000"]),
+        ("partition:gpu", &["101512"]),
+        ("part:cpu", &["303333"]),
+        ("state:running", &["101512"]),
+        ("st:PD", &["202000"]),
+        ("time:01:23", &["303333"]),
+    ];
+
+    for (query, expected) in expectations {
+        let mut app = app_with_jobs(filter_test_jobs(), Some(0));
+        app.apply_job_filter(query);
+        assert_eq!(visible_job_ids(&app), ids(expected), "query {query}");
+    }
+}
+
+#[test]
+fn unknown_field_prefix_falls_back_to_free_text() {
+    let mut jobs = filter_test_jobs();
+    jobs[2].name = "unknown:needle".to_string();
+    let mut app = app_with_jobs(jobs, Some(0));
+
+    app.apply_job_filter("unknown:needle");
+
+    assert_eq!(visible_job_ids(&app), ids(&["303333"]));
+}
+
+#[test]
+fn filtering_preserves_selection_and_uses_visible_fallbacks() {
+    let mut app = app_with_jobs(filter_test_jobs(), Some(1));
+
+    app.apply_job_filter("state:pd");
+    assert_eq!(app.selected_job_id(), Some("202000".to_string()));
+    assert_eq!(app.job_list_state.selected(), Some(0));
+
+    app.apply_job_filter("user:chlo");
+    assert_eq!(app.selected_job_id(), Some("101512".to_string()));
+    assert_eq!(app.job_list_state.selected(), Some(0));
+
+    app.apply_job_filter("name:missing");
+    assert_eq!(app.selected_job_id(), None);
+    assert_eq!(app.job_list_state.selected(), None);
+
+    app.apply_job_filter("");
+    assert_eq!(visible_job_ids(&app), ids(&["101512", "202000", "303333"]));
+    assert_eq!(app.selected_job_id(), Some("101512".to_string()));
+    assert_eq!(app.job_list_state.selected(), Some(0));
+}
+
+#[test]
+fn filtering_keeps_active_sort_order() {
+    let mut app = app_with_jobs(filter_test_jobs(), Some(0));
+
+    app.handle(AppMessage::Key(key('n')));
+    app.handle(AppMessage::Key(key('n')));
+    app.apply_job_filter("user:chlo");
+
+    assert_eq!(app.job_sort_field, JobSortField::Name);
+    assert_eq!(app.job_sort_direction, SortDirection::Asc);
+    assert_eq!(visible_job_ids(&app), ids(&["303333", "101512"]));
+}
+
+#[test]
+fn filtered_jobs_title_scrollbar_and_empty_state_use_visible_count() {
+    let mut app = app_with_jobs(filter_test_jobs(), Some(0));
+    app.apply_job_filter("name:missing");
+
+    let buffer = draw_app(&mut app, 120, 12);
+    let header_y = app.job_list_area.y.saturating_add(1);
+    let header_text = row_text(&buffer, app.job_list_area, header_y);
+    let all_text = buffer_text(&buffer, 120, 12);
+    let symbols = jobs_area_symbols(&buffer, app.job_list_rows_area());
+
+    assert!(all_text.contains("Jobs (0/3) filter: name:missing"));
+    assert!(header_text.contains("partition"));
+    assert!(!all_text.contains("vasp-alpha"));
+    assert!(!symbols.iter().any(|symbol| symbol == "▲"));
+    assert!(!symbols.iter().any(|symbol| symbol == "▼"));
+    assert_eq!(app.selected_job_id(), None);
+}
+
+#[test]
+fn filter_popup_renders_over_base_ui_with_title() {
+    let mut app = app_with_jobs(filter_test_jobs(), Some(0));
+    open_filter(&mut app);
+    type_in_filter(&mut app, "gpu");
+
+    let buffer = draw_app(&mut app, 120, 12);
+    let all_text = buffer_text(&buffer, 120, 12);
+    let header_y = app.job_list_area.y.saturating_add(1);
+    let header_text = row_text(&buffer, app.job_list_area, header_y);
+
+    assert!(all_text.contains("Filter:"));
+    assert!(all_text.contains("gpu"));
+    assert!(header_text.contains("partition"));
+}
+
+#[test]
+fn bracket_keys_cycle_focus_forward_and_backward() {
+    let mut app = test_app(3, Some(0));
+
+    assert_eq!(app.focus, Focus::Jobs);
+
+    app.handle(AppMessage::Key(key(']')));
+    assert_eq!(app.focus, Focus::Details);
+
+    app.handle(AppMessage::Key(key(']')));
+    assert_eq!(app.focus, Focus::Log);
+
+    app.handle(AppMessage::Key(key(']')));
+    assert_eq!(app.focus, Focus::Jobs);
+
+    app.handle(AppMessage::Key(key('[')));
+    assert_eq!(app.focus, Focus::Log);
+
+    app.handle(AppMessage::Key(key('[')));
+    assert_eq!(app.focus, Focus::Details);
+
+    app.handle(AppMessage::Key(key('[')));
+    assert_eq!(app.focus, Focus::Jobs);
+}
+
+#[test]
+fn tab_h_l_and_arrow_keys_do_not_switch_focus() {
+    let mut app = test_app(3, Some(0));
+    app.focus = Focus::Details;
+
+    for key_event in [
+        special_key(KeyCode::Tab),
+        special_key(KeyCode::BackTab),
+        key('h'),
+        key('l'),
+        special_key(KeyCode::Left),
+        special_key(KeyCode::Right),
+    ] {
+        app.handle(AppMessage::Key(key_event));
+        assert_eq!(app.focus, Focus::Details);
+    }
+}
+
+#[test]
+fn filter_dialog_keeps_bracket_input_and_focus() {
+    let mut app = test_app(3, Some(0));
+    open_filter(&mut app);
+
+    app.handle(AppMessage::Key(key(']')));
+    app.handle(AppMessage::Key(key('[')));
+
+    assert_eq!(app.focus, Focus::Jobs);
+    match app.dialog.as_ref() {
+        Some(Dialog::FilterJobs { input }) => assert_eq!(input.value(), "]["),
+        _ => panic!("expected filter dialog"),
+    }
+}
+
+#[test]
+fn jobs_navigation_stays_in_jobs_focus() {
+    let mut app = test_app(4, Some(0));
+
+    app.handle(AppMessage::Key(key('j')));
+    assert_eq!(app.job_list_state.selected(), Some(1));
+
+    app.handle(AppMessage::Key(key('k')));
+    assert_eq!(app.job_list_state.selected(), Some(0));
+}
+
+#[test]
+fn log_focus_routes_navigation_to_log_scrolling() {
+    let mut app = test_app(30, Some(2));
+    let _ = draw_app(&mut app, 120, 16);
+    app.focus = Focus::Log;
+    app.job_output_anchor = ScrollAnchor::Top;
+    app.job_output_offset = 0;
+
+    app.handle(AppMessage::Key(key('j')));
+    assert_eq!(app.job_list_state.selected(), Some(2));
+    assert_eq!(app.job_output_offset, 1);
+
+    app.handle(AppMessage::Key(key_with_modifiers(
+        'd',
+        crossterm::event::KeyModifiers::CONTROL,
+    )));
+    assert!(app.job_output_offset > 1);
+
+    app.handle(AppMessage::Key(key('G')));
+    assert_eq!(app.job_output_anchor, ScrollAnchor::Bottom);
+    assert_eq!(app.job_output_offset, 0);
+
+    app.handle(AppMessage::Key(key('g')));
+    assert_eq!(app.job_output_anchor, ScrollAnchor::Top);
+    assert_eq!(app.job_output_offset, 0);
+
+    app.handle(AppMessage::Key(key('w')));
+    assert!(app.job_output_wrap);
+}
+
+#[test]
+fn focused_border_style_tracks_the_active_panel() {
+    let mut jobs_app = test_app(3, Some(0));
+    let jobs_buffer = draw_app(&mut jobs_app, 120, 20);
+    assert_eq!(
+        border_fg(&jobs_buffer, jobs_app.job_list_area),
+        Some(Color::Green)
+    );
+    assert_ne!(
+        border_fg(&jobs_buffer, details_area(&jobs_app)),
+        Some(Color::Green)
+    );
+    assert_ne!(
+        border_fg(&jobs_buffer, jobs_app.job_output_area),
+        Some(Color::Green)
+    );
+
+    let mut details_app = test_app(3, Some(0));
+    details_app.focus = Focus::Details;
+    let details_buffer = draw_app(&mut details_app, 120, 20);
+    assert_ne!(
+        border_fg(&details_buffer, details_app.job_list_area),
+        Some(Color::Green)
+    );
+    assert_eq!(
+        border_fg(&details_buffer, details_area(&details_app)),
+        Some(Color::Green)
+    );
+    assert_ne!(
+        border_fg(&details_buffer, details_app.job_output_area),
+        Some(Color::Green)
+    );
+
+    let mut log_app = test_app(3, Some(0));
+    log_app.focus = Focus::Log;
+    let log_buffer = draw_app(&mut log_app, 120, 20);
+    assert_ne!(
+        border_fg(&log_buffer, log_app.job_list_area),
+        Some(Color::Green)
+    );
+    assert_ne!(
+        border_fg(&log_buffer, details_area(&log_app)),
+        Some(Color::Green)
+    );
+    assert_eq!(
+        border_fg(&log_buffer, log_app.job_output_area),
+        Some(Color::Green)
+    );
+}
+
+#[test]
+fn help_line_reflects_the_active_focus() {
+    let mut jobs_app = test_app(3, Some(0));
+    let jobs_text = buffer_text(&draw_app(&mut jobs_app, 120, 12), 120, 12);
+    assert!(jobs_text.contains("mode: jobs"));
+    assert!(jobs_text.contains("f: filter"));
+
+    let mut details_app = test_app(3, Some(0));
+    details_app.focus = Focus::Details;
+    let details_text = buffer_text(&draw_app(&mut details_app, 120, 12), 120, 12);
+    assert!(details_text.contains("mode: details"));
+
+    let mut log_app = test_app(3, Some(0));
+    log_app.focus = Focus::Log;
+    let log_text = buffer_text(&draw_app(&mut log_app, 120, 12), 120, 12);
+    assert!(log_text.contains("mode: log"));
+    assert!(log_text.contains("w: wrap"));
+}
+
+#[test]
+fn mouse_click_focuses_details_and_log_panels() {
+    let mut app = test_app(4, Some(0));
+    let _ = draw_app(&mut app, 120, 20);
+
+    let details = details_area(&app);
+    app.handle(AppMessage::MouseClick {
+        column: details.x.saturating_add(1),
+        row: details.y.saturating_add(1),
+    });
+    assert_eq!(app.focus, Focus::Details);
+
+    let log = app.job_output_area;
+    app.handle(AppMessage::MouseClick {
+        column: log.x.saturating_add(1),
+        row: log.y.saturating_add(1),
+    });
+    assert_eq!(app.focus, Focus::Log);
+}
+
+#[test]
+fn mouse_click_on_jobs_restores_jobs_focus_and_selection() {
+    let mut app = test_app(6, Some(0));
+    let buffer = draw_app(&mut app, 120, 20);
+    app.focus = Focus::Log;
+
+    let first_row_y = app.job_list_area.y.saturating_add(2);
+    let first_row_text = row_text(&buffer, app.job_list_area, first_row_y);
+    let job_name_x = app.job_list_area.x + first_row_text.find("job-0").unwrap() as u16;
+
+    app.handle(AppMessage::MouseClick {
+        column: job_name_x,
+        row: first_row_y,
+    });
+
+    assert_eq!(app.focus, Focus::Jobs);
+    assert_eq!(app.job_list_state.selected(), Some(0));
+}
+
+#[test]
+fn dialog_blocks_mouse_focus_changes() {
+    let mut app = test_app(4, Some(0));
+    let _ = draw_app(&mut app, 120, 20);
+    app.dialog = Some(Dialog::FilterJobs {
+        input: Input::new(String::new()),
+    });
+
+    let details = details_area(&app);
+    let (should_quit, should_draw) =
+        app.handle_input_event(Event::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: details.x.saturating_add(1),
+            row: details.y.saturating_add(1),
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        }));
+
+    assert!(!should_quit);
+    assert!(!should_draw);
+    assert_eq!(app.focus, Focus::Jobs);
 }

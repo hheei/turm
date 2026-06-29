@@ -1,9 +1,5 @@
+use super::commands::{execute_scancel, execute_scontrol_update_timelimit, validated_time_limit};
 use super::*;
-use super::commands::{
-    execute_scancel,
-    execute_scontrol_update_timelimit,
-    validated_time_limit,
-};
 
 impl App {
     pub fn run<B: Backend<Error = io::Error>>(
@@ -50,10 +46,10 @@ impl App {
         }
     }
 
-    fn handle_input_event(&mut self, event: Event) -> (bool, bool) {
+    pub(super) fn handle_input_event(&mut self, event: Event) -> (bool, bool) {
         match event {
             Event::Key(key) => {
-                if key.code == KeyCode::Char('q') {
+                if self.dialog.is_none() && key.code == KeyCode::Char('q') {
                     return (true, false);
                 }
                 self.handle(AppMessage::Key(key));
@@ -65,13 +61,11 @@ impl App {
                     if self.dialog.is_some() {
                         return (false, false);
                     }
-                    if let Some(index) = self.job_index_at(mouse.column, mouse.row) {
-                        if self.job_list_state.selected() != Some(index) {
-                            self.handle(AppMessage::MouseClick(index));
-                            return (false, true);
-                        }
-                    }
-                    (false, false)
+                    self.handle(AppMessage::MouseClick {
+                        column: mouse.column,
+                        row: mouse.row,
+                    });
+                    (false, true)
                 }
                 MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                     if self.dialog.is_some() {
@@ -137,6 +131,7 @@ impl App {
                     let mut close_dialog = false;
                     let mut scancel_request = None;
                     let mut timelimit_request = None;
+                    let mut filter_to_apply = None;
                     let mut command_failure = None;
 
                     match self.dialog.as_mut().expect("dialog must exist") {
@@ -194,6 +189,25 @@ impl App {
                                 input.handle_event(&Event::Key(key));
                             }
                         },
+                        Dialog::FilterJobs { input } => match key.code {
+                            KeyCode::Enter => {
+                                filter_to_apply = Some(input.value().to_string());
+                                close_dialog = true;
+                            }
+                            KeyCode::Esc => {
+                                close_dialog = true;
+                            }
+                            KeyCode::Char('u')
+                                if key
+                                    .modifiers
+                                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                            {
+                                *input = Input::new(String::new());
+                            }
+                            _ => {
+                                input.handle_event(&Event::Key(key));
+                            }
+                        },
                         Dialog::CommandError { .. } => match key.code {
                             KeyCode::Enter | KeyCode::Esc => {
                                 close_dialog = true;
@@ -208,6 +222,9 @@ impl App {
                     if let Some((id, time_limit)) = timelimit_request {
                         command_failure = execute_scontrol_update_timelimit(&id, &time_limit).err();
                     }
+                    if let Some(filter) = filter_to_apply {
+                        self.apply_job_filter(&filter);
+                    }
                     if let Some(CommandFailure { command, output }) = command_failure {
                         self.dialog = Some(Dialog::CommandError { command, output });
                     } else if close_dialog {
@@ -215,47 +232,72 @@ impl App {
                     }
                 } else {
                     match key.code {
-                        KeyCode::Char('h') | KeyCode::Left => self.focus_previous_panel(),
-                        KeyCode::Char('l') | KeyCode::Right => self.focus_next_panel(),
+                        KeyCode::Char(']') => self.focus_next_panel(),
+                        KeyCode::Char('[') => self.focus_previous_panel(),
                         KeyCode::Char('k') | KeyCode::Up => match self.focus {
                             Focus::Jobs => self.select_previous_job(),
+                            Focus::Details => {}
+                            Focus::Log => self.scroll_job_output_up_by(1),
                         },
                         KeyCode::Char('j') | KeyCode::Down => match self.focus {
                             Focus::Jobs => self.select_next_job(),
+                            Focus::Details => {}
+                            Focus::Log => self.scroll_job_output_down_by(1),
                         },
                         KeyCode::Char('g') => match self.focus {
                             Focus::Jobs => self.select_first_job(),
+                            Focus::Details => {}
+                            Focus::Log => self.scroll_job_output_to_top(),
                         },
                         KeyCode::Char('G') => match self.focus {
                             Focus::Jobs => self.select_last_job(),
+                            Focus::Details => {}
+                            Focus::Log => self.scroll_job_output_to_bottom(),
                         },
-                        KeyCode::Char('s') => self.update_job_sort(JobSortField::State),
-                        KeyCode::Char('p') => self.update_job_sort(JobSortField::Partition),
-                        KeyCode::Char('i') => self.update_job_sort(JobSortField::Id),
-                        KeyCode::Char('n') => self.update_job_sort(JobSortField::Name),
-                        KeyCode::Char('u') => match self.focus {
-                            Focus::Jobs => {
-                                if key
-                                    .modifiers
-                                    .contains(crossterm::event::KeyModifiers::CONTROL)
-                                {
-                                    self.scroll_jobs_half_page_up()
-                                } else {
-                                    self.update_job_sort(JobSortField::User)
+                        KeyCode::Char('f') if matches!(self.focus, Focus::Jobs) => {
+                            self.dialog = Some(Dialog::FilterJobs {
+                                input: Input::new(self.active_filter.clone()),
+                            });
+                        }
+                        KeyCode::Char('s') if matches!(self.focus, Focus::Jobs) => {
+                            self.update_job_sort(JobSortField::State);
+                        }
+                        KeyCode::Char('p') if matches!(self.focus, Focus::Jobs) => {
+                            self.update_job_sort(JobSortField::Partition);
+                        }
+                        KeyCode::Char('i') if matches!(self.focus, Focus::Jobs) => {
+                            self.update_job_sort(JobSortField::Id);
+                        }
+                        KeyCode::Char('n') if matches!(self.focus, Focus::Jobs) => {
+                            self.update_job_sort(JobSortField::Name);
+                        }
+                        KeyCode::Char('u') => {
+                            if key
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL)
+                            {
+                                match self.focus {
+                                    Focus::Jobs => self.scroll_jobs_half_page_up(),
+                                    Focus::Details => {}
+                                    Focus::Log => self.scroll_job_output_half_page_up(),
+                                }
+                            } else if matches!(self.focus, Focus::Jobs) {
+                                self.update_job_sort(JobSortField::User);
+                            }
+                        }
+                        KeyCode::Char('d') => {
+                            if key
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL)
+                            {
+                                match self.focus {
+                                    Focus::Jobs => self.scroll_jobs_half_page_down(),
+                                    Focus::Details => {}
+                                    Focus::Log => self.scroll_job_output_half_page_down(),
                                 }
                             }
-                        },
-                        KeyCode::Char('d') => match self.focus {
-                            Focus::Jobs => {
-                                if key
-                                    .modifiers
-                                    .contains(crossterm::event::KeyModifiers::CONTROL)
-                                {
-                                    self.scroll_jobs_half_page_down()
-                                }
-                            }
-                        },
-                        KeyCode::PageDown => {
+                        }
+                        KeyCode::PageDown if matches!(self.focus, Focus::Log) => {
                             let delta = if key.modifiers.intersects(
                                 crossterm::event::KeyModifiers::SHIFT
                                     | crossterm::event::KeyModifiers::CONTROL
@@ -267,7 +309,7 @@ impl App {
                             };
                             self.scroll_job_output_down_by(delta);
                         }
-                        KeyCode::PageUp => {
+                        KeyCode::PageUp if matches!(self.focus, Focus::Log) => {
                             let delta = if key.modifiers.intersects(
                                 crossterm::event::KeyModifiers::SHIFT
                                     | crossterm::event::KeyModifiers::CONTROL
@@ -279,20 +321,18 @@ impl App {
                             };
                             self.scroll_job_output_up_by(delta);
                         }
-                        KeyCode::Home => {
-                            self.job_output_offset = 0;
-                            self.job_output_anchor = ScrollAnchor::Top;
+                        KeyCode::Home if matches!(self.focus, Focus::Log) => {
+                            self.scroll_job_output_to_top();
                         }
-                        KeyCode::End => {
-                            self.job_output_offset = 0;
-                            self.job_output_anchor = ScrollAnchor::Bottom;
+                        KeyCode::End if matches!(self.focus, Focus::Log) => {
+                            self.scroll_job_output_to_bottom();
                         }
-                        KeyCode::Char('c') => {
+                        KeyCode::Char('c') if matches!(self.focus, Focus::Jobs) => {
                             if let Some(id) = self.selected_job_id() {
                                 self.dialog = Some(Dialog::ConfirmCancelJob(id));
                             }
                         }
-                        KeyCode::Char('C') => {
+                        KeyCode::Char('C') if matches!(self.focus, Focus::Jobs) => {
                             if let Some(id) = self.selected_job_id() {
                                 self.dialog = Some(Dialog::SelectCancelSignal {
                                     id,
@@ -300,7 +340,7 @@ impl App {
                                 });
                             }
                         }
-                        KeyCode::Char('t') => {
+                        KeyCode::Char('t') if matches!(self.focus, Focus::Jobs) => {
                             if key
                                 .modifiers
                                 .contains(crossterm::event::KeyModifiers::CONTROL)
@@ -315,22 +355,31 @@ impl App {
                                 self.update_job_sort(JobSortField::Time);
                             }
                         }
-                        KeyCode::Char('o') => {
+                        KeyCode::Char('o') if matches!(self.focus, Focus::Log) => {
                             self.output_file_view = match self.output_file_view {
                                 OutputFileView::Stdout => OutputFileView::Stderr,
                                 OutputFileView::Stderr => OutputFileView::Stdout,
                             };
                         }
-                        KeyCode::Char('w') => {
+                        KeyCode::Char('w') if matches!(self.focus, Focus::Log) => {
                             self.job_output_wrap = !self.job_output_wrap;
                         }
                         _ => {}
                     };
                 }
             }
-            AppMessage::MouseClick(index) => {
-                if self.dialog.is_none() && index < self.jobs.len() {
-                    self.job_list_state.select(Some(index));
+            AppMessage::MouseClick { column, row } => {
+                if self.dialog.is_none() {
+                    if let Some(index) = self.job_index_at(column, row) {
+                        self.focus = Focus::Jobs;
+                        if index < self.visible_job_indices().len() {
+                            self.job_list_state.select(Some(index));
+                        }
+                    } else if rect_contains(self.job_details_area, column, row) {
+                        self.focus = Focus::Details;
+                    } else if rect_contains(self.job_output_area, column, row) {
+                        self.focus = Focus::Log;
+                    }
                 }
             }
             AppMessage::MouseWheel {
@@ -354,18 +403,21 @@ impl App {
         }
 
         self.job_output_watcher
-            .set_file_path(self.job_list_state.selected().and_then(|i| {
-                self.jobs.get(i).and_then(|j| match self.output_file_view {
-                    OutputFileView::Stdout => j.stdout.clone(),
-                    OutputFileView::Stderr => j.stderr.clone(),
-                })
-            }));
+            .set_file_path(
+                self.selected_job()
+                    .and_then(|job| match self.output_file_view {
+                        OutputFileView::Stdout => job.stdout.clone(),
+                        OutputFileView::Stderr => job.stderr.clone(),
+                    }),
+            );
     }
 
-    fn selected_job(&self) -> Option<&Job> {
+    pub(super) fn selected_job(&self) -> Option<&Job> {
+        let visible_job_indices = self.visible_job_indices();
         self.job_list_state
             .selected()
-            .and_then(|i| self.jobs.get(i))
+            .and_then(|index| visible_job_indices.get(index).copied())
+            .and_then(|index| self.jobs.get(index))
     }
 
     pub(super) fn selected_job_id(&self) -> Option<String> {
@@ -373,39 +425,55 @@ impl App {
     }
 
     fn focus_next_panel(&mut self) {
-        match self.focus {
-            Focus::Jobs => self.focus = Focus::Jobs,
-        }
+        self.focus = match self.focus {
+            Focus::Jobs => Focus::Details,
+            Focus::Details => Focus::Log,
+            Focus::Log => Focus::Jobs,
+        };
     }
 
     fn focus_previous_panel(&mut self) {
-        match self.focus {
-            Focus::Jobs => self.focus = Focus::Jobs,
-        }
+        self.focus = match self.focus {
+            Focus::Jobs => Focus::Log,
+            Focus::Details => Focus::Jobs,
+            Focus::Log => Focus::Details,
+        };
     }
 
     fn select_next_job(&mut self) {
-        self.job_list_state.select_next();
+        if !self.visible_job_indices().is_empty() {
+            self.job_list_state.select_next();
+        }
     }
 
     fn select_previous_job(&mut self) {
-        self.job_list_state.select_previous();
+        if !self.visible_job_indices().is_empty() {
+            self.job_list_state.select_previous();
+        }
     }
 
     fn select_first_job(&mut self) {
-        self.job_list_state.select_first();
+        if !self.visible_job_indices().is_empty() {
+            self.job_list_state.select_first();
+        }
     }
 
     fn select_last_job(&mut self) {
-        self.job_list_state.select_last();
+        if !self.visible_job_indices().is_empty() {
+            self.job_list_state.select_last();
+        }
     }
 
     pub(super) fn scroll_jobs_half_page_down(&mut self) {
-        self.job_list_state.scroll_down_by(self.job_list_height / 2);
+        if !self.visible_job_indices().is_empty() {
+            self.job_list_state.scroll_down_by(self.job_list_height / 2);
+        }
     }
 
     pub(super) fn scroll_jobs_half_page_up(&mut self) {
-        self.job_list_state.scroll_up_by(self.job_list_height / 2);
+        if !self.visible_job_indices().is_empty() {
+            self.job_list_state.scroll_up_by(self.job_list_height / 2);
+        }
     }
 
     pub(super) fn job_list_rows_area(&self) -> Rect {
@@ -418,7 +486,8 @@ impl App {
     }
 
     fn job_index_at(&self, column: u16, row: u16) -> Option<usize> {
-        if self.jobs.is_empty() {
+        let visible_job_indices = self.visible_job_indices();
+        if visible_job_indices.is_empty() {
             return None;
         }
         let rows_area = self.job_list_rows_area();
@@ -428,7 +497,33 @@ impl App {
 
         let row_in_list = (row - rows_area.y) as usize;
         let index = self.job_list_state.offset().saturating_add(row_in_list);
-        (index < self.jobs.len()).then_some(index)
+        (index < visible_job_indices.len()).then_some(index)
+    }
+
+    fn scroll_job_output_half_page_down(&mut self) {
+        self.scroll_job_output_down_by(self.job_output_page_step());
+    }
+
+    fn scroll_job_output_half_page_up(&mut self) {
+        self.scroll_job_output_up_by(self.job_output_page_step());
+    }
+
+    fn scroll_job_output_to_top(&mut self) {
+        self.job_output_offset = 0;
+        self.job_output_anchor = ScrollAnchor::Top;
+    }
+
+    fn scroll_job_output_to_bottom(&mut self) {
+        self.job_output_offset = 0;
+        self.job_output_anchor = ScrollAnchor::Bottom;
+    }
+
+    fn job_output_page_step(&self) -> u16 {
+        self.job_output_area
+            .height
+            .saturating_sub(2)
+            .saturating_div(2)
+            .max(1)
     }
 
     fn scroll_job_output_down_by(&mut self, delta: u16) {

@@ -58,13 +58,17 @@ impl App {
         selected_id: Option<String>,
         fallback_index: Option<usize>,
     ) {
-        if self.jobs.is_empty() {
+        let visible_job_indices = self.visible_job_indices();
+        if visible_job_indices.is_empty() {
             self.job_list_state.select(None);
             return;
         }
 
         if let Some(selected_id) = selected_id {
-            if let Some(index) = self.jobs.iter().position(|job| job.id() == selected_id) {
+            if let Some(index) = visible_job_indices
+                .iter()
+                .position(|&job_index| self.jobs[job_index].id() == selected_id)
+            {
                 self.job_list_state.select(Some(index));
                 return;
             }
@@ -72,7 +76,7 @@ impl App {
 
         if let Some(index) = fallback_index {
             self.job_list_state
-                .select(Some(index.min(self.jobs.len() - 1)));
+                .select(Some(index.min(visible_job_indices.len() - 1)));
         } else {
             self.job_list_state.select_first();
         }

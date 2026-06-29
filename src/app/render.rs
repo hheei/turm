@@ -17,17 +17,36 @@ impl App {
             .constraints([Constraint::Length(8), Constraint::Min(3)].as_ref())
             .split(master_detail[1]);
 
-        let help_options = vec![
-            ("q", "quit"),
-            ("⏶/⏷", "navigate"),
-            ("pgup/pgdown", "scroll"),
-            ("home/end", "top/bottom"),
-            ("esc", "cancel"),
-            ("enter", "confirm"),
-            ("ctrl+t", "set time limit"),
-            ("o", "toggle stdout/stderr"),
-            ("w", "toggle text wrap"),
-        ];
+        let help_options = if matches!(self.dialog, Some(Dialog::FilterJobs { .. })) {
+            vec![
+                ("mode", "filter"),
+                ("enter", "apply"),
+                ("esc", "cancel"),
+                ("ctrl+u", "clear"),
+            ]
+        } else {
+            match self.focus {
+                Focus::Jobs => vec![
+                    ("mode", "jobs"),
+                    ("[/]", "focus"),
+                    ("f", "filter"),
+                    ("s/p/i/n/u/t", "sort"),
+                    ("j/k", "move"),
+                    ("c", "cancel"),
+                    ("q", "quit"),
+                ],
+                Focus::Details => vec![("mode", "details"), ("[/]", "focus"), ("q", "quit")],
+                Focus::Log => vec![
+                    ("mode", "log"),
+                    ("[/]", "focus"),
+                    ("j/k", "scroll"),
+                    ("g/G", "top/bottom"),
+                    ("o", "output"),
+                    ("w", "wrap"),
+                    ("q", "quit"),
+                ],
+            }
+        };
         let blue_style = Style::default().fg(Color::Blue);
         let light_blue_style = Style::default().fg(Color::LightBlue);
 
@@ -47,32 +66,39 @@ impl App {
         let help = Paragraph::new(help);
         f.render_widget(help, content_help[1]);
 
-        let max_id_len = self.jobs.iter().map(|j| j.id().len()).max().unwrap_or(0);
-        let max_user_len = self.jobs.iter().map(|j| j.user.len()).max().unwrap_or(0);
-        let max_partition_len = self
-            .jobs
+        let visible_job_indices = self.visible_job_indices();
+        let visible_jobs = visible_job_indices
+            .iter()
+            .map(|&index| &self.jobs[index])
+            .collect::<Vec<_>>();
+
+        let max_id_len = visible_jobs.iter().map(|j| j.id().len()).max().unwrap_or(0);
+        let max_user_len = visible_jobs.iter().map(|j| j.user.len()).max().unwrap_or(0);
+        let max_partition_len = visible_jobs
             .iter()
             .map(|j| j.partition.len())
             .max()
             .unwrap_or(0);
-        let max_time_len = self.jobs.iter().map(|j| j.time.len()).max().unwrap_or(0);
-        let max_state_compact_len = self
-            .jobs
+        let max_time_len = visible_jobs.iter().map(|j| j.time.len()).max().unwrap_or(0);
+        let max_state_compact_len = visible_jobs
             .iter()
             .map(|j| j.state_compact.len())
             .max()
             .unwrap_or(0);
         let jobs_block = Block::default()
-            .title(format!("─Jobs ({})", self.jobs.len()))
+            .title(jobs_title(
+                master_detail[0].width,
+                visible_job_indices.len(),
+                self.jobs.len(),
+                &self.active_filter,
+            ))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(if self.dialog.is_some() {
-                Style::default()
-            } else {
-                match self.focus {
-                    Focus::Jobs => Style::default().fg(Color::Green),
-                }
-            });
+            .border_style(panel_border_style(
+                self.dialog.as_ref(),
+                self.focus,
+                Focus::Jobs,
+            ));
         let header_style = Style::default();
         let job_header = Row::new(vec![
             sort_header_cell(
@@ -120,8 +146,7 @@ impl App {
             Constraint::Length((max_user_len.max(5) as u16).min(12)),
             Constraint::Length((max_time_len.max(5) as u16).min(12)),
         ];
-        let jobs: Vec<Row> = self
-            .jobs
+        let jobs: Vec<Row> = visible_jobs
             .iter()
             .map(|j| {
                 Row::new(vec![
@@ -156,7 +181,7 @@ impl App {
         self.job_list_area = master_detail[0];
 
         let job_list_viewport_height = usize::from(self.job_list_height);
-        let job_list_content_height = self.jobs.len();
+        let job_list_content_height = visible_job_indices.len();
         let job_list_scroll_offset = self.job_list_state.offset();
         let job_list_rows_area = self.job_list_rows_area();
 
@@ -175,10 +200,7 @@ impl App {
             );
         }
 
-        let job_detail = self
-            .job_list_state
-            .selected()
-            .and_then(|i| self.jobs.get(i));
+        let job_detail = self.selected_job();
 
         let job_detail = job_detail.map(|j| {
             let mut state_spans = vec![
@@ -243,9 +265,15 @@ impl App {
             Block::default()
                 .title("─Details")
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded),
+                .border_type(BorderType::Rounded)
+                .border_style(panel_border_style(
+                    self.dialog.as_ref(),
+                    self.focus,
+                    Focus::Details,
+                )),
         );
         f.render_widget(job_detail, job_detail_log[0]);
+        self.job_details_area = job_detail_log[0];
 
         let log_area = job_detail_log[1];
         self.job_output_area = log_area;
@@ -265,9 +293,15 @@ impl App {
                 Style::default().add_modifier(Modifier::DIM),
             ),
         ]);
-        let log_block = Block::default().title(log_title).borders(Borders::ALL);
-        let log_block = log_block.border_type(BorderType::Rounded);
-
+        let log_block = Block::default()
+            .title(log_title)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(panel_border_style(
+                self.dialog.as_ref(),
+                self.focus,
+                Focus::Log,
+            ));
         let log = match self.job_output.as_deref() {
             Ok(s) => Paragraph::new(fit_text(
                 s,
@@ -286,15 +320,6 @@ impl App {
         f.render_widget(log, log_area);
 
         if let Some(dialog) = &self.dialog {
-            fn centered_dialog_area(width: u16, lines: u16, viewport: Rect) -> Rect {
-                let dialog_width = min(width, viewport.width);
-                let dialog_height = min(lines, viewport.height);
-                let dialog_x = viewport.x + viewport.width.saturating_sub(dialog_width) / 2;
-                let dialog_y = viewport.y + viewport.height.saturating_sub(dialog_height) / 2;
-
-                Rect::new(dialog_x, dialog_y, dialog_width, dialog_height)
-            }
-
             match dialog {
                 Dialog::ConfirmCancelJob(id) => {
                     let dialog = Paragraph::new(Line::from(vec![
@@ -404,6 +429,41 @@ impl App {
                     let cursor_y = inner.y;
                     f.set_cursor_position((cursor_x, cursor_y));
                 }
+                Dialog::FilterJobs { input } => {
+                    let block = Block::default()
+                        .title("Filter:")
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .style(Style::default().fg(Color::Green));
+
+                    let area = filter_popup_area(f.area());
+                    let inner = block.inner(area);
+                    let available_width = inner.width.max(1) as usize;
+                    let scroll = input.visual_scroll(available_width);
+                    let visible_value = input
+                        .value()
+                        .chars()
+                        .skip(scroll)
+                        .take(available_width)
+                        .collect::<String>();
+                    let dialog = Paragraph::new(Line::from(vec![Span::styled(
+                        visible_value,
+                        Style::default().fg(Color::Blue),
+                    )]))
+                    .style(Style::default().fg(Color::White))
+                    .block(block);
+
+                    f.render_widget(Clear, area);
+                    f.render_widget(dialog, area);
+
+                    let cursor_offset = input.visual_cursor().saturating_sub(scroll) as u16;
+                    let cursor_x = inner
+                        .x
+                        .saturating_add(cursor_offset)
+                        .min(inner.x.saturating_add(inner.width.saturating_sub(1)));
+                    let cursor_y = inner.y;
+                    f.set_cursor_position((cursor_x, cursor_y));
+                }
                 Dialog::CommandError { command, output } => {
                     let dialog_text = format!("Command: {command}\n\n{output}");
                     let lines = dialog_text
@@ -429,6 +489,72 @@ impl App {
             }
         }
     }
+}
+
+fn panel_border_style(dialog: Option<&Dialog>, focus: Focus, panel: Focus) -> Style {
+    if dialog.is_some() {
+        Style::default()
+    } else if focus == panel {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default()
+    }
+}
+
+fn centered_dialog_area(width: u16, lines: u16, viewport: Rect) -> Rect {
+    let dialog_width = min(width, viewport.width);
+    let dialog_height = min(lines, viewport.height);
+    let dialog_x = viewport.x + viewport.width.saturating_sub(dialog_width) / 2;
+    let dialog_y = viewport.y + viewport.height.saturating_sub(dialog_height) / 2;
+
+    Rect::new(dialog_x, dialog_y, dialog_width, dialog_height)
+}
+
+fn filter_popup_area(viewport: Rect) -> Rect {
+    let max_width = viewport.width.saturating_sub(4).max(1);
+    let min_width = min(30, max_width);
+    let preferred_width = min(max_width, ((viewport.width as usize * 3) / 5) as u16);
+    let centered = centered_dialog_area(
+        preferred_width.max(min_width),
+        min(3, viewport.height),
+        viewport,
+    );
+
+    Rect::new(
+        centered.x,
+        centered.y.saturating_sub(1),
+        centered.width,
+        centered.height,
+    )
+}
+
+fn jobs_title(width: u16, visible_count: usize, total_count: usize, active_filter: &str) -> String {
+    let title = if active_filter.is_empty() {
+        format!("─Jobs ({total_count})")
+    } else {
+        format!("─Jobs ({visible_count}/{total_count}) filter: {active_filter}")
+    };
+
+    truncate_with_ellipsis(&title, width.saturating_sub(4) as usize)
+}
+
+fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {
+    let chars = value.chars().collect::<Vec<_>>();
+    if chars.len() <= max_chars {
+        return value.to_string();
+    }
+    if max_chars == 0 {
+        return String::new();
+    }
+    if max_chars == 1 {
+        return "…".to_string();
+    }
+
+    chars
+        .into_iter()
+        .take(max_chars.saturating_sub(1))
+        .chain(once('…'))
+        .collect()
 }
 
 pub(super) fn chunked_string(s: &str, first_chunk_size: usize, chunk_size: usize) -> Vec<&str> {
