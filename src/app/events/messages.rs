@@ -270,7 +270,6 @@ impl App {
                         KeyCode::Char('c') if matches!(self.focus, Focus::Jobs) => {
                             self.dialog = self.copy_job_output_directory_dialog();
                         }
-                        KeyCode::Char('C') if matches!(self.focus, Focus::Jobs) => {}
                         KeyCode::Char('r')
                             if key
                                 .modifiers
@@ -299,7 +298,6 @@ impl App {
                         KeyCode::Char('t') if matches!(self.focus, Focus::Jobs) => {
                             self.update_job_sort(JobSortField::Time);
                         }
-                        KeyCode::Char('o') => self.cycle_output_panel_mode(),
                         KeyCode::Char('w') if matches!(self.focus, Focus::Log) => {
                             self.job_output_wrap = !self.job_output_wrap;
                             if self.job_output_wrap {

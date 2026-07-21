@@ -37,7 +37,7 @@ fn workdir_mode_reports_missing_path() {
     let mut app = test_app(1, Some(0));
     app.set_output_mode(OutputPanelMode::Collapsed);
     let _ = draw_app(&mut app, 120, 40);
-    app.handle(AppMessage::Key(key('o')));
+    app.handle(AppMessage::Key(special_key(KeyCode::Tab)));
     let text = buffer_text(&draw_app(&mut app, 100, 29), 100, 29);
 
     assert!(text.contains("No workdir available"));
@@ -63,7 +63,7 @@ fn workdir_listing_is_shallow_sorted_and_classified() {
     app.jobs_mut()[0].workdir = Some(temp_root.clone());
     app.set_output_mode(OutputPanelMode::Collapsed);
     let _ = draw_app(&mut app, 120, 40);
-    app.handle(AppMessage::Key(key('o')));
+    app.handle(AppMessage::Key(special_key(KeyCode::Tab)));
 
     let text = buffer_text(&draw_app(&mut app, 120, 50), 120, 50);
 
@@ -92,7 +92,7 @@ fn workdir_mode_handles_unreadable_directory_without_panic() {
     app.jobs_mut()[0].workdir = Some(temp_root.clone());
     app.set_output_mode(OutputPanelMode::Collapsed);
     let _ = draw_app(&mut app, 120, 40);
-    app.handle(AppMessage::Key(key('o')));
+    app.handle(AppMessage::Key(special_key(KeyCode::Tab)));
 
     let text = buffer_text(&draw_app(&mut app, 120, 29), 120, 29);
 

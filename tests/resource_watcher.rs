@@ -1,7 +1,7 @@
 use std::path::Path;
 use turm::test_support::{
-    ResourceSnapshot, fetch_resources_from, parse_sinfo_json, parse_sinfo_text,
-    sort_resource_snapshots,
+    ResourceSnapshot, fetch_resources_from, parse_group_usage_text, parse_sinfo_json,
+    parse_sinfo_text, sort_resource_snapshots,
 };
 
 #[test]
@@ -159,30 +159,47 @@ fn plain_parser_groups_by_partition() {
 }
 
 #[test]
-fn sort_resources_orders_by_available_desc_then_partition() {
+fn sort_resources_orders_by_total_then_available() {
     let resources = sort_resource_snapshots(vec![
         ResourceSnapshot {
             partition: "A".into(),
-            running_nodes: 1,
+            running_nodes: 20,
+            group_used_nodes: 2,
             available_nodes: 5,
         },
         ResourceSnapshot {
             partition: "B".into(),
             running_nodes: 2,
+            group_used_nodes: 1,
             available_nodes: 10,
         },
         ResourceSnapshot {
             partition: "C".into(),
             running_nodes: 3,
+            group_used_nodes: 0,
             available_nodes: 0,
         },
+        ResourceSnapshot {
+            partition: "D".into(),
+            running_nodes: 17,
+            group_used_nodes: 4,
+            available_nodes: 8,
+        },
     ]);
-    assert_eq!(resources[0].partition, "B");
-    assert_eq!(resources[0].available_nodes, 10);
+    assert_eq!(resources[0].partition, "D");
+    assert_eq!(resources[0].available_nodes, 8);
     assert_eq!(resources[1].partition, "A");
     assert_eq!(resources[1].available_nodes, 5);
-    assert_eq!(resources[2].partition, "C");
-    assert_eq!(resources[2].available_nodes, 0);
+    assert_eq!(resources[2].partition, "B");
+    assert_eq!(resources[3].partition, "C");
+}
+
+#[test]
+fn group_usage_sums_running_allocations_by_partition() {
+    assert_eq!(
+        parse_group_usage_text("A|3\nA|2\nB|1\nB|invalid\n"),
+        vec![("A".to_string(), 5), ("B".to_string(), 1)]
+    );
 }
 
 #[test]
@@ -190,4 +207,12 @@ fn mock_sinfo_integration_returns_resources() {
     let sinfo = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/mock-slurm/bin/sinfo");
     let resources = fetch_resources_from(&sinfo).expect("mock sinfo should succeed");
     assert!(!resources.is_empty(), "mock resources should not be empty");
+    assert_eq!(
+        resources
+            .iter()
+            .find(|r| r.partition == "A")
+            .unwrap()
+            .group_used_nodes,
+        3
+    );
 }

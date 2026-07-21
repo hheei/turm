@@ -102,7 +102,7 @@ impl SqueueArgs {
     }
 }
 
-fn primary_group() -> Option<String> {
+pub(crate) fn primary_group() -> Option<String> {
     let output = Command::new("id").arg("-gn").output().ok()?;
     output
         .status

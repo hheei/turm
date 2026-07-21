@@ -237,6 +237,7 @@ pub struct App {
 pub(crate) struct PartitionResources {
     pub(crate) partition: String,
     pub(crate) running_nodes: u32,
+    pub(crate) group_used_nodes: u32,
     pub(crate) available_nodes: u32,
 }
 

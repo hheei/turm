@@ -8,9 +8,45 @@ fn resources_panel_renders_title_and_headers() {
     let text = buffer_text(&buffer, 120, 20);
     assert!(text.contains("Res"));
     assert!(text.contains("Partition"));
-    assert!(text.contains("Running"));
-    assert!(text.contains("Available"));
+    assert!(text.contains("Used"));
+    assert!(text.contains("Avail"));
+    assert!(!text.contains("Running"));
+    assert!(!text.contains("Available"));
     assert!(!text.contains("Pending"));
+}
+
+#[test]
+fn resources_show_group_usage_and_dim_unavailable_partitions() {
+    let mut app = test_app(1, Some(0));
+    app.set_resources(vec![
+        turm::test_support::ResourceSnapshot {
+            partition: "open".to_string(),
+            running_nodes: 8,
+            group_used_nodes: 3,
+            available_nodes: 2,
+        },
+        turm::test_support::ResourceSnapshot {
+            partition: "full".to_string(),
+            running_nodes: 12,
+            group_used_nodes: 4,
+            available_nodes: 0,
+        },
+    ]);
+    let buffer = draw_app(&mut app, 120, 20);
+    let area = app.resource_area();
+    let text = buffer_text(&buffer, 120, 20);
+    let full_y = (area.y + 2..area.bottom())
+        .find(|&y| row_text(&buffer, area, y).contains("full"))
+        .unwrap();
+
+    assert!(text.contains("8(3)"));
+    assert!(text.contains("12(4)"));
+    assert!((area.x + 2..area.right().saturating_sub(2)).all(|x| {
+        buffer[(x, full_y)]
+            .style()
+            .add_modifier
+            .contains(Modifier::DIM)
+    }));
 }
 
 #[test]

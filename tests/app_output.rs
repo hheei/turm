@@ -8,7 +8,7 @@ fn collapsing_output_moves_log_focus_to_jobs() {
     app.set_output_mode(OutputPanelMode::Stderr);
     let _ = draw_app(&mut app, 120, 40);
 
-    app.handle(AppMessage::Key(key('o')));
+    app.handle(AppMessage::Key(special_key(KeyCode::Tab)));
 
     assert_eq!(app.output_mode(), OutputPanelMode::Collapsed);
     assert_eq!(app.focus(), Focus::Jobs);
@@ -21,7 +21,7 @@ fn leaving_collapsed_keeps_jobs_focus() {
     app.set_output_mode(OutputPanelMode::Collapsed);
     let _ = draw_app(&mut app, 120, 40);
 
-    app.handle(AppMessage::Key(key('o')));
+    app.handle(AppMessage::Key(special_key(KeyCode::Tab)));
 
     assert_eq!(app.output_mode(), OutputPanelMode::Workdir);
     assert_eq!(app.focus(), Focus::Jobs);
@@ -36,7 +36,7 @@ fn output_mode_switch_resets_tail_position() {
     app.set_output_offset(7);
     let _ = draw_app(&mut app, 120, 40);
 
-    app.handle(AppMessage::Key(key('o')));
+    app.handle(AppMessage::Key(special_key(KeyCode::Tab)));
 
     assert_eq!(app.output_mode(), OutputPanelMode::Stderr);
     assert_eq!(app.output_anchor(), ScrollAnchor::Bottom);

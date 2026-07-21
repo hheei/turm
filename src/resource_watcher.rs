@@ -7,6 +7,7 @@ use crossbeam::channel::Sender;
 
 use crate::app::AppMessage;
 use crate::app::PartitionResources;
+use crate::squeue_args::primary_group;
 
 struct ResourceWatcher {
     app: Sender<AppMessage>,
@@ -51,40 +52,83 @@ impl ResourceWatcherHandle {
 /// Runs `sinfo` and returns parsed partition resources.
 /// Tries `--json` first (Slurm 23.02+), falls back to plain format.
 pub(crate) fn fetch_resources() -> Result<Vec<PartitionResources>, Box<dyn std::error::Error>> {
-    fetch_resources_with("sinfo")
+    fetch_resources_with("sinfo", "squeue")
 }
 
 pub(crate) fn fetch_resources_with(
     sinfo: impl AsRef<std::ffi::OsStr>,
+    squeue: impl AsRef<std::ffi::OsStr>,
 ) -> Result<Vec<PartitionResources>, Box<dyn std::error::Error>> {
     let sinfo = sinfo.as_ref();
+    let mut resources = None;
     // Try --json first (newer Slurm)
     if let Ok(output) = Command::new(sinfo).arg("--json").output() {
         if output.status.success() {
             if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
-                return Ok(sort_resources(parse_sinfo_resources(&value)));
+                resources = Some(parse_sinfo_resources(&value));
             }
         }
     }
-    // Fallback: plain sinfo output (Slurm 20.11 and older)
-    let output = Command::new(sinfo)
-        .args(["-o", "%P %t %D", "--noheader"])
+    let mut resources = match resources {
+        Some(resources) => resources,
+        None => {
+            // Fallback: plain sinfo output (Slurm 20.11 and older)
+            let output = Command::new(sinfo)
+                .args(["-o", "%P %t %D", "--noheader"])
+                .output()?;
+            if !output.status.success() {
+                return Err("sinfo command failed".into());
+            }
+            parse_sinfo_plain(&String::from_utf8_lossy(&output.stdout))
+        }
+    };
+    let group = primary_group().ok_or("failed to determine primary group")?;
+    let output = Command::new(squeue)
+        .args([
+            "--noheader",
+            "--states=RUNNING",
+            &format!("--accounts={group}"),
+            "--format=%P|%D",
+        ])
         .output()?;
     if !output.status.success() {
-        return Err("sinfo command failed".into());
+        return Err("squeue command failed".into());
     }
-    let text = String::from_utf8_lossy(&output.stdout);
-    Ok(sort_resources(parse_sinfo_plain(&text)))
+    let group_usage = parse_group_usage(&String::from_utf8_lossy(&output.stdout));
+    for resource in &mut resources {
+        resource.group_used_nodes = group_usage
+            .get(&resource.partition)
+            .copied()
+            .unwrap_or_default()
+            .min(resource.running_nodes);
+    }
+    Ok(sort_resources(resources))
 }
 
-/// Sort resources: Available descending, then partition name ascending.
+/// Sort resources: total nodes descending, then available nodes descending.
 pub(crate) fn sort_resources(mut resources: Vec<PartitionResources>) -> Vec<PartitionResources> {
     resources.sort_by(|a, b| {
-        b.available_nodes
-            .cmp(&a.available_nodes)
-            .then(a.partition.cmp(&b.partition))
+        b.running_nodes
+            .saturating_add(b.available_nodes)
+            .cmp(&a.running_nodes.saturating_add(a.available_nodes))
+            .then_with(|| b.available_nodes.cmp(&a.available_nodes))
+            .then_with(|| a.partition.cmp(&b.partition))
     });
     resources
+}
+
+pub(crate) fn parse_group_usage(text: &str) -> BTreeMap<String, u32> {
+    let mut usage = BTreeMap::new();
+    for line in text.lines() {
+        let Some((partition, count)) = line.trim().split_once('|') else {
+            continue;
+        };
+        let Ok(count) = count.trim().parse::<u32>() else {
+            continue;
+        };
+        *usage.entry(partition.trim().to_string()).or_default() += count;
+    }
+    usage
 }
 
 /// Parse plain `sinfo -o '%P %t %D' --noheader` output.
@@ -107,6 +151,7 @@ pub(crate) fn parse_sinfo_plain(text: &str) -> Vec<PartitionResources> {
             .or_insert_with(|| PartitionResources {
                 partition: partition.to_string(),
                 running_nodes: 0,
+                group_used_nodes: 0,
                 available_nodes: 0,
             });
         match normalize_node_state(state) {
@@ -140,6 +185,7 @@ pub(crate) fn parse_sinfo_resources(value: &serde_json::Value) -> Vec<PartitionR
             .or_insert_with(|| PartitionResources {
                 partition: partition.to_string(),
                 running_nodes: 0,
+                group_used_nodes: 0,
                 available_nodes: 0,
             });
 

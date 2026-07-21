@@ -195,7 +195,7 @@ fn o_cycles_output_modes_in_order() {
         OutputPanelMode::Collapsed,
         OutputPanelMode::Workdir,
     ] {
-        app.handle(AppMessage::Key(key('o')));
+        app.handle(AppMessage::Key(special_key(KeyCode::Tab)));
         assert_eq!(app.output_mode(), expected_mode);
     }
 }
@@ -223,7 +223,7 @@ fn o_switches_output_mode_from_every_focus() {
         app.set_focus(focus);
         let _ = draw_app(&mut app, 120, 40);
 
-        app.handle(AppMessage::Key(key('o')));
+        app.handle(AppMessage::Key(special_key(KeyCode::Tab)));
 
         assert_eq!(
             app.output_mode(),
@@ -238,7 +238,7 @@ fn o_does_not_cycle_while_filter_dialog_is_open() {
     let mut app = test_app(1, Some(0));
     open_filter(&mut app);
 
-    app.handle(AppMessage::Key(key('o')));
+    app.handle(AppMessage::Key(special_key(KeyCode::Tab)));
 
     assert_eq!(app.output_mode(), OutputPanelMode::Workdir);
     match app.dialog() {

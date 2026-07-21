@@ -20,8 +20,8 @@ impl App {
             .border_style(Style::default().fg(Color::DarkGray));
         let resource_header = Row::new(vec![
             Cell::from("Partition"),
-            Cell::from("Running"),
-            Cell::from("Available"),
+            Cell::from("Used"),
+            Cell::from("Avail"),
         ]);
         let resource_rows: Vec<Row> = if self.resources.is_empty() {
             vec![Row::new(vec![
@@ -38,13 +38,18 @@ impl App {
                 .map(|r| {
                     Row::new(vec![
                         Cell::from(r.partition.as_str()),
-                        Cell::from(r.running_nodes.to_string()),
+                        Cell::from(format!("{}({})", r.running_nodes, r.group_used_nodes)),
                         Cell::from(r.available_nodes.to_string()),
                     ])
+                    .style(if r.available_nodes == 0 {
+                        Style::default().add_modifier(Modifier::DIM)
+                    } else {
+                        Style::default()
+                    })
                 })
                 .collect()
         };
-        let resource_widths = [Constraint::Min(10), Constraint::Min(8), Constraint::Min(10)];
+        let resource_widths = [Constraint::Min(10), Constraint::Min(8), Constraint::Min(5)];
         let resource_table = Table::new(resource_rows, resource_widths)
             .header(resource_header)
             .block(resources_block)

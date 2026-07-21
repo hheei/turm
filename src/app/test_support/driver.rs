@@ -289,6 +289,13 @@ impl AppDriver {
         self.app.resource_area
     }
 
+    pub fn set_resources(&mut self, resources: Vec<ResourceSnapshot>) {
+        self.app.resources = resources
+            .into_iter()
+            .map(PartitionResources::from)
+            .collect();
+    }
+
     pub fn set_workdir_entries(&mut self, entries: Vec<TestWorkdirEntry>) {
         self.app.workdir_entries = entries
             .into_iter()

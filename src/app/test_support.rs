@@ -73,6 +73,7 @@ pub struct AppSnapshot {
 pub struct ResourceSnapshot {
     pub partition: String,
     pub running_nodes: u32,
+    pub group_used_nodes: u32,
     pub available_nodes: u32,
 }
 

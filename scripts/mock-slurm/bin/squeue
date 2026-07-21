@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ " $* " == *" --format=%P|%D "* ]]; then
+    printf '%s\n' 'A|3' 'B|6'
+    exit 0
+fi
+
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd -- "$script_dir/../../.." && pwd)"
 log_dir="$root_dir/scripts/mock-slurm/logs"
