@@ -39,6 +39,22 @@ pub(super) fn execute_scontrol_update_timelimit(
     )
 }
 
+pub(super) fn execute_scontrol_update_job_name(
+    job_id: &str,
+    job_name: &str,
+) -> Result<(), CommandFailure> {
+    let mut command = Command::new("scontrol");
+    command
+        .arg("update")
+        .arg(format!("JobId={job_id}"))
+        .arg(format!("Name={job_name}"));
+
+    execute_command(
+        command,
+        format!("scontrol update JobId={job_id} Name={job_name}"),
+    )
+}
+
 fn execute_command(mut command: Command, command_label: String) -> Result<(), CommandFailure> {
     let output = command.output().map_err(|error| CommandFailure {
         command: command_label.clone(),

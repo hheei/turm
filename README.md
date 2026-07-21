@@ -8,9 +8,9 @@ A TUI for [Slurm](https://slurm.schedmd.com/), which provides a convenient way t
 
 <img alt="turm demo" src="https://github.com/user-attachments/assets/7daade50-def3-4bf8-bf12-df311438094e" width="100%" />
 
-`turm` accepts the same options as `squeue` (see [man squeue](https://slurm.schedmd.com/squeue.html#SECTION_OPTIONS)). Use `turm --help` to get a list of all available options. For example, to show only your own jobs, sorted by descending job ID, including all job states (i.e., including completed and failed jobs):
+`turm` displays active jobs and jobs recorded by Slurm during the previous two days. Use `turm --help` to see the available filters. For example, to show only your own jobs, including completed and failed jobs:
 ```shell
-turm --me --sort=-id --states=ALL
+turm --me --states=ALL
 ```
 
 ## Installation
@@ -62,26 +62,41 @@ In your `config.fish` or in a separate `completions/turm.fish` file, add the fol
 turm completion fish | source
 ```
 
+### Change directory on exit (Zsh)
+
+Like Yazi, `turm` can write the selected directory to a temporary file so a
+shell function can change the current shell's directory. Add this to `.zshrc`:
+
+```zsh
+unalias sq 2>/dev/null
+sq() {
+    local tmp cwd rc
+    tmp="$(mktemp -t turm-cwd.XXXXXX)" || return
+    command turm "$@" --cwd-file="$tmp"
+    rc=$?
+    cwd="$(<"$tmp")"
+    [[ -n "$cwd" && "$cwd" != "$PWD" ]] && builtin cd -- "$cwd"
+    command rm -f -- "$tmp"
+    return $rc
+}
+```
+
 ## How it works
 
-`turm` obtains information about jobs by parsing the output of `squeue`.
-The reason for this is that `squeue` is available on all Slurm clusters, and running it periodically is not too expensive for the Slurm controller ( particularly when [filtering by user](https://slurm.schedmd.com/squeue.html#OPT_user)).
-In contrast, Slurm's C API is unstable, and Slurm's REST API is not always available and can be costly for the Slurm controller.
-Another advantage is that we get free support for the exact same CLI flags as `squeue`, which users are already familiar with, for filtering and sorting the jobs.
+`turm` obtains information about jobs by parsing a single `sacct` query. The query includes allocation records active during the previous two days, so pending, running, completed, failed, and cancelled jobs can share one list. Accounting updates can take a few seconds to appear after a job is submitted.
 
 ### Resource usage
 
-TL;DR: `turm` ≈ `watch -n2 squeue` + `tail -f slurm-log.out`
+TL;DR: `turm` ≈ `watch -n2 sacct` + `tail -f slurm-log.out`
 
 Special care has been taken to ensure that `turm` is as lightweight as possible in terms of its impact on the Slurm controller and its file I/O operations.
-The job queue is updated every two seconds by running `squeue`.
-When there are many jobs in the queue, it is advisable to specify a single user to reduce the load on the Slurm controller (see [squeue --user](https://slurm.schedmd.com/squeue.html#OPT_user)).
+The job list is updated every two seconds by running `sacct`. By default, active jobs are limited to the current account while historical jobs are limited to the current user; `--me`, `--user`, and `--account` provide explicit scopes.
 `turm` updates the currently displayed log file on every inotify modify notification, and it only reads the newly appended lines after the initial read.
 However, since inotify notifications are not supported for remote file systems, such as NFS, `turm` also polls the file for newly appended bytes every two seconds.
 
 ## Development without Slurm
 
-For local UI testing, this repository includes mocks for `squeue`, `scancel`, and `scontrol`:
+For local UI testing, this repository includes mocks for `sacct`, `scancel`, and `scontrol`:
 
 ```shell
 PATH=scripts/mock-slurm/bin:$PATH cargo run -- --me

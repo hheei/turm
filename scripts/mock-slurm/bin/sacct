@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+root_dir="$(cd -- "$script_dir/../../.." && pwd)"
+log_dir="$root_dir/scripts/mock-slurm/logs"
+user="${USER:-mock}"
+
+printf '%s\n' \
+"1001|1001|train-model|RUNNING|${user}|00:12:37|01:00:00|2026-07-20T12:00:00|cpu=4,mem=8G|debug|mac-mini-01|${log_dir}/job-1001.out|${log_dir}/job-1001.err|None|${root_dir}|python train.py --epochs 50" \
+"1002|1002|eval-suite|PENDING|${user}|00:00:00|00:30:00|Unknown|cpu=2,mem=4G|debug||||Resources|${root_dir}|" \
+"1000|1000|prepare-data|COMPLETED|${user}|00:03:21|00:10:00|2026-07-19T09:00:00|cpu=1,mem=1G|debug|mac-mini-01|||None|${root_dir}|python prepare.py"

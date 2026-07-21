@@ -1,10 +1,3 @@
-mod app;
-mod file_watcher;
-mod job_watcher;
-mod resource_watcher;
-mod squeue_args;
-
-use app::App;
 use clap::CommandFactory;
 use clap::Parser;
 use clap::Subcommand;
@@ -19,13 +12,20 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{
-    Terminal,
-    backend::{Backend, CrosstermBackend},
-};
-use squeue_args::SqueueArgs;
+use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io::Write;
-use std::{io, panic, thread};
+use std::{
+    fs, io, panic,
+    path::PathBuf,
+    process::Command,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
+    time::Duration,
+};
+use turm::{App, AppExit, SqueueArgs};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -38,9 +38,13 @@ struct Cli {
     #[arg(long, value_name = "SECONDS", default_value_t = 2)]
     file_refresh: u64,
 
-    /// squeue arguments
+    /// Slurm job filters
     #[command(flatten)]
     squeue_args: SqueueArgs,
+
+    /// Write the selected directory here when exiting.
+    #[arg(long, value_name = "PATH")]
+    cwd_file: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Option<CliCommand>,
@@ -68,8 +72,7 @@ fn main() -> io::Result<()> {
 
     install_panic_hook();
 
-    let mut terminal_guard = TerminalGuard::new(io::stdout())?;
-    run_app(terminal_guard.terminal_mut(), args)
+    run_app(args)
 }
 
 fn install_panic_hook() {
@@ -123,18 +126,52 @@ impl<W: Write> Drop for TerminalGuard<W> {
     }
 }
 
-fn input_loop(tx: Sender<std::io::Result<Event>>) {
-    while tx.send(event::read()).is_ok() {}
+fn input_loop(tx: Sender<std::io::Result<Event>>, stop: Arc<AtomicBool>) {
+    while !stop.load(Ordering::Relaxed) {
+        match event::poll(Duration::from_millis(50)) {
+            Ok(true) if tx.send(event::read()).is_err() => break,
+            Ok(true) | Ok(false) => {}
+            Err(_) => break,
+        }
+    }
 }
 
-fn run_app<B: Backend<Error = io::Error>>(terminal: &mut Terminal<B>, args: Cli) -> io::Result<()> {
+fn run_app(args: Cli) -> io::Result<()> {
     let (input_tx, input_rx) = unbounded();
+    let cwd_file = args.cwd_file;
     let mut app = App::new(
         input_rx,
         args.slurm_refresh,
         args.file_refresh,
         args.squeue_args.to_vec(),
     );
-    thread::spawn(move || input_loop(input_tx));
-    app.run(terminal)
+    loop {
+        let mut terminal_guard = TerminalGuard::new(io::stdout())?;
+        let stop_input = Arc::new(AtomicBool::new(false));
+        let input_stop = Arc::clone(&stop_input);
+        let input_tx = input_tx.clone();
+        let input_thread = thread::spawn(move || input_loop(input_tx, input_stop));
+        let action = app.run(terminal_guard.terminal_mut());
+        stop_input.store(true, Ordering::Relaxed);
+        let _ = input_thread.join();
+        let action = action?;
+        drop(terminal_guard);
+
+        match action {
+            Some(AppExit::OpenEditor(path)) => {
+                let status = Command::new("vi").arg(path).status()?;
+                if !status.success() {
+                    return Err(io::Error::other(format!("vi exited with {status}")));
+                }
+            }
+            Some(AppExit::ChangeDirectory(path)) => {
+                std::env::set_current_dir(&path)?;
+                if let Some(cwd_file) = &cwd_file {
+                    fs::write(cwd_file, path.as_os_str().as_encoded_bytes())?;
+                }
+                return Ok(());
+            }
+            None => return Ok(()),
+        }
+    }
 }

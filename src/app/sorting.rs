@@ -45,11 +45,13 @@ impl App {
         let sort_direction = self.job_sort_direction;
 
         self.jobs.sort_by(|left, right| {
+            let completed_order = (left.state_compact.eq_ignore_ascii_case("CD"))
+                .cmp(&right.state_compact.eq_ignore_ascii_case("CD"));
             let ordering = compare_jobs_by_field(left, right, sort_field);
-            match sort_direction {
+            completed_order.then_with(|| match sort_direction {
                 SortDirection::Asc => ordering,
                 SortDirection::Desc => ordering.reverse(),
-            }
+            })
         });
     }
 

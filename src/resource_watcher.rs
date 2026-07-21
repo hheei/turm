@@ -51,8 +51,15 @@ impl ResourceWatcherHandle {
 /// Runs `sinfo` and returns parsed partition resources.
 /// Tries `--json` first (Slurm 23.02+), falls back to plain format.
 pub(crate) fn fetch_resources() -> Result<Vec<PartitionResources>, Box<dyn std::error::Error>> {
+    fetch_resources_with("sinfo")
+}
+
+pub(crate) fn fetch_resources_with(
+    sinfo: impl AsRef<std::ffi::OsStr>,
+) -> Result<Vec<PartitionResources>, Box<dyn std::error::Error>> {
+    let sinfo = sinfo.as_ref();
     // Try --json first (newer Slurm)
-    if let Ok(output) = Command::new("sinfo").arg("--json").output() {
+    if let Ok(output) = Command::new(sinfo).arg("--json").output() {
         if output.status.success() {
             if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
                 return Ok(sort_resources(parse_sinfo_resources(&value)));
@@ -60,7 +67,7 @@ pub(crate) fn fetch_resources() -> Result<Vec<PartitionResources>, Box<dyn std::
         }
     }
     // Fallback: plain sinfo output (Slurm 20.11 and older)
-    let output = Command::new("sinfo")
+    let output = Command::new(sinfo)
         .args(["-o", "%P %t %D", "--noheader"])
         .output()?;
     if !output.status.success() {
@@ -71,7 +78,7 @@ pub(crate) fn fetch_resources() -> Result<Vec<PartitionResources>, Box<dyn std::
 }
 
 /// Sort resources: Available descending, then partition name ascending.
-fn sort_resources(mut resources: Vec<PartitionResources>) -> Vec<PartitionResources> {
+pub(crate) fn sort_resources(mut resources: Vec<PartitionResources>) -> Vec<PartitionResources> {
     resources.sort_by(|a, b| {
         b.available_nodes
             .cmp(&a.available_nodes)
@@ -161,212 +168,5 @@ fn normalize_node_state(state: &str) -> NormalizedNodeState {
         "idle" => NormalizedNodeState::Available,
         // Everything else is unavailable (down, drain, fail, reserved, unknown, etc.)
         _ => NormalizedNodeState::Unavailable,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn counts_allocated_as_running() {
-        let json = serde_json::json!({
-            "nodes": [
-                {"partition": "debug", "state": "allocated"},
-                {"partition": "debug", "state": "allocated"}
-            ]
-        });
-        let resources = parse_sinfo_resources(&json);
-        assert_eq!(resources.len(), 1);
-        assert_eq!(resources[0].running_nodes, 2);
-        assert_eq!(resources[0].available_nodes, 0);
-    }
-
-    #[test]
-    fn counts_mixed_as_running() {
-        let json = serde_json::json!({
-            "nodes": [
-                {"partition": "gpu", "state": "MIXED"},
-                {"partition": "gpu", "state": "mix"},
-                {"partition": "gpu", "state": "ALLOCATED"}
-            ]
-        });
-        let resources = parse_sinfo_resources(&json);
-        assert_eq!(resources.len(), 1);
-        assert_eq!(resources[0].partition, "gpu");
-        assert_eq!(resources[0].running_nodes, 3);
-        assert_eq!(resources[0].available_nodes, 0);
-    }
-
-    #[test]
-    fn counts_idle_as_available() {
-        let json = serde_json::json!({
-            "nodes": [
-                {"partition": "debug", "state": "idle"},
-                {"partition": "debug", "state": "IDLE"},
-                {"partition": "debug", "state": "allocated"}
-            ]
-        });
-        let resources = parse_sinfo_resources(&json);
-        assert_eq!(resources.len(), 1);
-        assert_eq!(resources[0].running_nodes, 1);
-        assert_eq!(resources[0].available_nodes, 2);
-    }
-
-    #[test]
-    fn excludes_unavailable_states() {
-        let json = serde_json::json!({
-            "nodes": [
-                {"partition": "debug", "state": "down"},
-                {"partition": "debug", "state": "drain"},
-                {"partition": "debug", "state": "draining"},
-                {"partition": "debug", "state": "drained"},
-                {"partition": "debug", "state": "fail"},
-                {"partition": "debug", "state": "failing"},
-                {"partition": "debug", "state": "reserved"},
-                {"partition": "debug", "state": "unknown"},
-                {"partition": "debug", "state": "idle"},
-                {"partition": "debug", "state": "allocated"}
-            ]
-        });
-        let resources = parse_sinfo_resources(&json);
-        assert_eq!(resources.len(), 1);
-        assert_eq!(resources[0].running_nodes, 1);
-        assert_eq!(resources[0].available_nodes, 1);
-    }
-
-    #[test]
-    fn groups_and_sorts_by_partition() {
-        let json = serde_json::json!({
-            "nodes": [
-                {"partition": "gpu", "state": "allocated"},
-                {"partition": "debug", "state": "idle"},
-                {"partition": "cpu", "state": "mixed"},
-                {"partition": "gpu", "state": "idle"},
-                {"partition": "debug", "state": "allocated"},
-                {"partition": "cpu", "state": "idle"}
-            ]
-        });
-        let resources = parse_sinfo_resources(&json);
-        assert_eq!(resources.len(), 3);
-        // BTreeMap sorts lexicographically: cpu < debug < gpu
-        assert_eq!(resources[0].partition, "cpu");
-        assert_eq!(resources[0].running_nodes, 1);
-        assert_eq!(resources[0].available_nodes, 1);
-        assert_eq!(resources[1].partition, "debug");
-        assert_eq!(resources[1].running_nodes, 1);
-        assert_eq!(resources[1].available_nodes, 1);
-        assert_eq!(resources[2].partition, "gpu");
-        assert_eq!(resources[2].running_nodes, 1);
-        assert_eq!(resources[2].available_nodes, 1);
-    }
-
-    #[test]
-    fn missing_nodes_field_returns_empty() {
-        let json = serde_json::json!({"partitions": []});
-        let resources = parse_sinfo_resources(&json);
-        assert!(resources.is_empty());
-    }
-
-    #[test]
-    fn missing_partition_or_state_skips_node() {
-        let json = serde_json::json!({
-            "nodes": [
-                {"state": "idle"},
-                {"partition": "debug"},
-                {"partition": "debug", "state": "allocated"}
-            ]
-        });
-        let resources = parse_sinfo_resources(&json);
-        assert_eq!(resources.len(), 1);
-        assert_eq!(resources[0].running_nodes, 1);
-        assert_eq!(resources[0].available_nodes, 0);
-    }
-
-    // ── Plain-text parser tests ──
-
-    #[test]
-    fn plain_parser_counts_with_node_count_field() {
-        let text = "debug alloc 3\ndebug idle 2\n";
-        let resources = parse_sinfo_plain(text);
-        assert_eq!(resources.len(), 1);
-        assert_eq!(resources[0].running_nodes, 3);
-        assert_eq!(resources[0].available_nodes, 2);
-    }
-
-    #[test]
-    fn plain_parser_counts_mix_as_running() {
-        let text = "gpu mix 2\ngpu alloc 1\ngpu idle 4\n";
-        let resources = parse_sinfo_plain(text);
-        assert_eq!(resources.len(), 1);
-        assert_eq!(resources[0].running_nodes, 3);
-        assert_eq!(resources[0].available_nodes, 4);
-    }
-
-    #[test]
-    fn plain_parser_defaults_to_1_when_count_missing() {
-        let text = "debug alloc\ndebug idle\n";
-        let resources = parse_sinfo_plain(text);
-        assert_eq!(resources.len(), 1);
-        assert_eq!(resources[0].running_nodes, 1);
-        assert_eq!(resources[0].available_nodes, 1);
-    }
-
-    #[test]
-    fn plain_parser_ignores_unavailable_states() {
-        let text = "debug down 5\ndebug drain 3\ndebug alloc 2\ndebug idle 1\n";
-        let resources = parse_sinfo_plain(text);
-        assert_eq!(resources.len(), 1);
-        assert_eq!(resources[0].running_nodes, 2);
-        assert_eq!(resources[0].available_nodes, 1);
-    }
-
-    #[test]
-    fn plain_parser_groups_by_partition() {
-        let text = "gpu alloc 1\ndebug idle 2\ncpu mix 3\ncpu idle 4\n";
-        let resources = parse_sinfo_plain(text);
-        assert_eq!(resources.len(), 3);
-        // BTreeMap sorts by key: cpu < debug < gpu (before sort_resources)
-        assert_eq!(resources[0].partition, "cpu");
-        assert_eq!(resources[0].running_nodes, 3);
-        assert_eq!(resources[0].available_nodes, 4);
-    }
-
-    #[test]
-    fn sort_resources_orders_by_available_desc_then_partition() {
-        let resources = sort_resources(vec![
-            PartitionResources {
-                partition: "A".into(),
-                running_nodes: 1,
-                available_nodes: 5,
-            },
-            PartitionResources {
-                partition: "B".into(),
-                running_nodes: 2,
-                available_nodes: 10,
-            },
-            PartitionResources {
-                partition: "C".into(),
-                running_nodes: 3,
-                available_nodes: 0,
-            },
-        ]);
-        assert_eq!(resources[0].partition, "B");
-        assert_eq!(resources[0].available_nodes, 10);
-        assert_eq!(resources[1].partition, "A");
-        assert_eq!(resources[1].available_nodes, 5);
-        assert_eq!(resources[2].partition, "C");
-        assert_eq!(resources[2].available_nodes, 0);
-    }
-
-    #[test]
-    fn real_sinfo_integration_diagnostic() {
-        let result = fetch_resources();
-        match &result {
-            Ok(r) => eprintln!("DIAG: fetch_resources OK, {} partitions: {:?}", r.len(), r),
-            Err(e) => eprintln!("DIAG: fetch_resources FAILED: {}", e),
-        }
-        assert!(result.is_ok(), "fetch_resources failed: {:?}", result.err());
-        assert!(!result.unwrap().is_empty(), "resources empty");
     }
 }
