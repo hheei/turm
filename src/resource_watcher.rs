@@ -108,9 +108,8 @@ pub(crate) fn fetch_resources_with(
 /// Sort resources: total nodes descending, then available nodes descending.
 pub(crate) fn sort_resources(mut resources: Vec<PartitionResources>) -> Vec<PartitionResources> {
     resources.sort_by(|a, b| {
-        b.running_nodes
-            .saturating_add(b.available_nodes)
-            .cmp(&a.running_nodes.saturating_add(a.available_nodes))
+        b.total_nodes
+            .cmp(&a.total_nodes)
             .then_with(|| b.available_nodes.cmp(&a.available_nodes))
             .then_with(|| a.partition.cmp(&b.partition))
     });
@@ -150,10 +149,12 @@ pub(crate) fn parse_sinfo_plain(text: &str) -> Vec<PartitionResources> {
             .entry(partition.to_string())
             .or_insert_with(|| PartitionResources {
                 partition: partition.to_string(),
+                total_nodes: 0,
                 running_nodes: 0,
                 group_used_nodes: 0,
                 available_nodes: 0,
             });
+        entry.total_nodes = entry.total_nodes.saturating_add(count);
         match normalize_node_state(state) {
             NormalizedNodeState::Running => entry.running_nodes += count,
             NormalizedNodeState::Available => entry.available_nodes += count,
@@ -184,11 +185,13 @@ pub(crate) fn parse_sinfo_resources(value: &serde_json::Value) -> Vec<PartitionR
             .entry(partition.to_string())
             .or_insert_with(|| PartitionResources {
                 partition: partition.to_string(),
+                total_nodes: 0,
                 running_nodes: 0,
                 group_used_nodes: 0,
                 available_nodes: 0,
             });
 
+        entry.total_nodes = entry.total_nodes.saturating_add(1);
         match normalize_node_state(state) {
             NormalizedNodeState::Running => entry.running_nodes += 1,
             NormalizedNodeState::Available => entry.available_nodes += 1,

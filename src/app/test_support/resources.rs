@@ -43,6 +43,7 @@ impl From<PartitionResources> for ResourceSnapshot {
     fn from(resource: PartitionResources) -> Self {
         Self {
             partition: resource.partition,
+            total_nodes: resource.total_nodes,
             running_nodes: resource.running_nodes,
             group_used_nodes: resource.group_used_nodes,
             available_nodes: resource.available_nodes,
@@ -54,6 +55,7 @@ impl From<ResourceSnapshot> for PartitionResources {
     fn from(resource: ResourceSnapshot) -> Self {
         Self {
             partition: resource.partition,
+            total_nodes: resource.total_nodes,
             running_nodes: resource.running_nodes,
             group_used_nodes: resource.group_used_nodes,
             available_nodes: resource.available_nodes,

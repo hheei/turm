@@ -13,6 +13,12 @@ fn resources_panel_renders_title_and_headers() {
     assert!(!text.contains("Running"));
     assert!(!text.contains("Available"));
     assert!(!text.contains("Pending"));
+    let header_y = app.resource_area().y.saturating_add(1);
+    assert!(
+        (app.resource_area().x + 2..app.resource_area().right().saturating_sub(2))
+            .filter(|&x| !buffer[(x, header_y)].symbol().trim().is_empty())
+            .all(|x| buffer[(x, header_y)].fg == Color::Cyan)
+    );
 }
 
 #[test]
@@ -21,12 +27,14 @@ fn resources_show_group_usage_and_dim_unavailable_partitions() {
     app.set_resources(vec![
         turm::test_support::ResourceSnapshot {
             partition: "open".to_string(),
+            total_nodes: 10,
             running_nodes: 8,
             group_used_nodes: 3,
             available_nodes: 2,
         },
         turm::test_support::ResourceSnapshot {
             partition: "full".to_string(),
+            total_nodes: 12,
             running_nodes: 12,
             group_used_nodes: 4,
             available_nodes: 0,

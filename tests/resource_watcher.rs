@@ -154,6 +154,7 @@ fn plain_parser_groups_by_partition() {
     let resources = parse_sinfo_text("gpu alloc 1\ndebug idle 2\ncpu mix 3\ncpu idle 4\n");
     assert_eq!(resources.len(), 3);
     assert_eq!(resources[0].partition, "cpu");
+    assert_eq!(resources[0].total_nodes, 7);
     assert_eq!(resources[0].running_nodes, 3);
     assert_eq!(resources[0].available_nodes, 4);
 }
@@ -163,35 +164,38 @@ fn sort_resources_orders_by_total_then_available() {
     let resources = sort_resource_snapshots(vec![
         ResourceSnapshot {
             partition: "A".into(),
+            total_nodes: 30,
             running_nodes: 20,
             group_used_nodes: 2,
             available_nodes: 5,
         },
         ResourceSnapshot {
             partition: "B".into(),
+            total_nodes: 12,
             running_nodes: 2,
             group_used_nodes: 1,
             available_nodes: 10,
         },
         ResourceSnapshot {
             partition: "C".into(),
+            total_nodes: 40,
             running_nodes: 3,
             group_used_nodes: 0,
             available_nodes: 0,
         },
         ResourceSnapshot {
             partition: "D".into(),
+            total_nodes: 30,
             running_nodes: 17,
             group_used_nodes: 4,
             available_nodes: 8,
         },
     ]);
-    assert_eq!(resources[0].partition, "D");
-    assert_eq!(resources[0].available_nodes, 8);
-    assert_eq!(resources[1].partition, "A");
-    assert_eq!(resources[1].available_nodes, 5);
-    assert_eq!(resources[2].partition, "B");
-    assert_eq!(resources[3].partition, "C");
+    assert_eq!(resources[0].partition, "C");
+    assert_eq!(resources[1].partition, "D");
+    assert_eq!(resources[1].available_nodes, 8);
+    assert_eq!(resources[2].partition, "A");
+    assert_eq!(resources[3].partition, "B");
 }
 
 #[test]

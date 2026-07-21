@@ -72,6 +72,7 @@ pub struct AppSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourceSnapshot {
     pub partition: String,
+    pub total_nodes: u32,
     pub running_nodes: u32,
     pub group_used_nodes: u32,
     pub available_nodes: u32,

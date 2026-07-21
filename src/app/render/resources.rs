@@ -22,7 +22,12 @@ impl App {
             Cell::from("Partition"),
             Cell::from("Used"),
             Cell::from("Avail"),
-        ]);
+        ])
+        .style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
         let resource_rows: Vec<Row> = if self.resources.is_empty() {
             vec![Row::new(vec![
                 Cell::from(""),

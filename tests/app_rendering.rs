@@ -28,6 +28,11 @@ fn jobs_table_header_is_bold_with_blue_shortcuts_and_sort_slots() {
 
     assert_eq!(blue_header_symbols, vec!["s", "p", "j", "n", "u", "t"]);
     assert!(
+        (app.job_list_area().x..app.job_list_area().right())
+            .filter(|&x| !buffer[(x, header_y)].symbol().trim().is_empty())
+            .all(|x| matches!(buffer[(x, header_y)].fg, Color::Blue | Color::Cyan))
+    );
+    assert!(
         (app.job_list_area().x..app.job_list_area().right()).all(|x| !buffer[(x, header_y)]
             .style()
             .add_modifier

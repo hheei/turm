@@ -173,7 +173,9 @@ pub(super) fn render_workdir_text(
     );
     let mut rows = vec![Line::styled(
         clip_line(&header, scroll_x, cols),
-        Style::default().add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
     )];
     rows.extend(
         entries
@@ -306,8 +308,18 @@ pub(super) fn sort_header_cell<'a>(
                 .fg(Color::Blue)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(rest, Style::default().add_modifier(Modifier::BOLD)),
-        Span::styled(indicator, Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(
+            rest,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            indicator,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]))
 }
 
