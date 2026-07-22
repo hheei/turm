@@ -1,86 +1,15 @@
 #!/usr/bin/env bash
 # mock sinfo for turm tests
-# Supports both --json (newer Slurm) and -o '%P %t' --noheader (older Slurm)
 set -euo pipefail
 
-# Check if --json flag is present
-for arg in "$@"; do
-    if [ "$arg" = "--json" ]; then
-        cat <<'EOF'
-{
-  "nodes": [
-    {"partition": "A", "state": "alloc"},
-    {"partition": "A", "state": "alloc"},
-    {"partition": "A", "state": "alloc"},
-    {"partition": "A", "state": "alloc"},
-    {"partition": "A", "state": "alloc"},
-    {"partition": "A", "state": "alloc"},
-    {"partition": "A", "state": "alloc"},
-    {"partition": "A", "state": "alloc"},
-    {"partition": "A", "state": "alloc"},
-    {"partition": "B", "state": "alloc"},
-    {"partition": "B", "state": "alloc"},
-    {"partition": "B", "state": "alloc"},
-    {"partition": "B", "state": "alloc"},
-    {"partition": "B", "state": "alloc"},
-    {"partition": "B", "state": "alloc"},
-    {"partition": "B", "state": "alloc"},
-    {"partition": "B", "state": "alloc"},
-    {"partition": "B", "state": "alloc"},
-    {"partition": "B", "state": "alloc"},
-    {"partition": "B", "state": "mix"},
-    {"partition": "B", "state": "mix"},
-    {"partition": "B", "state": "mix"},
-    {"partition": "B", "state": "mix"},
-    {"partition": "B", "state": "mix"},
-    {"partition": "B", "state": "idle"},
-    {"partition": "B", "state": "idle"},
-    {"partition": "B", "state": "idle"},
-    {"partition": "B", "state": "idle"},
-    {"partition": "B", "state": "idle"},
-    {"partition": "B", "state": "idle"},
-    {"partition": "B", "state": "idle"},
-    {"partition": "B", "state": "down"},
-    {"partition": "B", "state": "drain"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "alloc"},
-    {"partition": "C", "state": "idle"}
-  ]
-}
-EOF
-        exit 0
-    fi
-done
-
-# Plain format fallback (matches real Slurm 20.11+ output)
+# Plain format from `sinfo -o '%P %t %D' --noheader`.
 cat <<'EOF'
-dcuZ100_fast idle
-dcuZ100 idle
-gpuA100_fast mix
-gpuA100 mix
-debug alloc
-fast alloc
-fast idle
-normal_lmxu alloc
-normal_lmxu idle
-bigmem alloc
+A alloc 9
+B alloc 10
+B mix 5
+B idle 7
+B down 1
+B drain 1
+C alloc 21
+C idle 1
 EOF

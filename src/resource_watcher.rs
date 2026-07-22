@@ -50,7 +50,6 @@ impl ResourceWatcherHandle {
 // ── sinfo fetching ──
 
 /// Runs `sinfo` and returns parsed partition resources.
-/// Tries `--json` first (Slurm 23.02+), falls back to plain format.
 pub(crate) fn fetch_resources() -> Result<Vec<PartitionResources>, Box<dyn std::error::Error>> {
     fetch_resources_with("sinfo", "squeue")
 }
@@ -60,28 +59,13 @@ pub(crate) fn fetch_resources_with(
     squeue: impl AsRef<std::ffi::OsStr>,
 ) -> Result<Vec<PartitionResources>, Box<dyn std::error::Error>> {
     let sinfo = sinfo.as_ref();
-    let mut resources = None;
-    // Try --json first (newer Slurm)
-    if let Ok(output) = Command::new(sinfo).arg("--json").output() {
-        if output.status.success() {
-            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
-                resources = Some(parse_sinfo_resources(&value));
-            }
-        }
+    let output = Command::new(sinfo)
+        .args(["-o", "%P %t %D", "--noheader"])
+        .output()?;
+    if !output.status.success() {
+        return Err("sinfo command failed".into());
     }
-    let mut resources = match resources {
-        Some(resources) => resources,
-        None => {
-            // Fallback: plain sinfo output (Slurm 20.11 and older)
-            let output = Command::new(sinfo)
-                .args(["-o", "%P %t %D", "--noheader"])
-                .output()?;
-            if !output.status.success() {
-                return Err("sinfo command failed".into());
-            }
-            parse_sinfo_plain(&String::from_utf8_lossy(&output.stdout))
-        }
-    };
+    let mut resources = parse_sinfo_plain(&String::from_utf8_lossy(&output.stdout));
     let group = primary_group().ok_or("failed to determine primary group")?;
     let output = Command::new(squeue)
         .args([

@@ -6,7 +6,9 @@
 
 A TUI for [Slurm](https://slurm.schedmd.com/), which provides a convenient way to manage your cluster jobs.
 
-<img alt="turm demo" src="https://github.com/user-attachments/assets/7daade50-def3-4bf8-bf12-df311438094e" width="100%" />
+This repository is a fork of [karimknaebel/turm](https://github.com/karimknaebel/turm).
+
+<img alt="turm running on a Slurm cluster" src="docs/turm-screenshot.png" width="100%" />
 
 `turm` displays active jobs and jobs recorded by Slurm during the previous two days. Use `turm --help` to see the available filters. For example, to show only your own jobs, including completed and failed jobs:
 ```shell
@@ -34,10 +36,10 @@ pixi global install turm
 conda install --channel conda-forge turm
 
 # With wget. Make sure ~/.local/bin is in your $PATH.
-wget https://github.com/karimknaebel/turm/releases/latest/download/turm-x86_64-unknown-linux-musl.tar.gz -O - | tar -xz -C ~/.local/bin/
+wget https://github.com/hheei/turm/releases/latest/download/turm-x86_64-unknown-linux-musl.tar.gz -O - | tar -xz -C ~/.local/bin/
 ```
 
-The [release page](https://github.com/karimknaebel/turm/releases) also contains precompiled binaries for Linux.
+The [release page](https://github.com/hheei/turm/releases) also contains precompiled binaries for Linux.
 
 ### Shell Completion (optional)
 
@@ -66,6 +68,10 @@ turm completion fish | source
 
 Like Yazi, `turm` can write the selected directory to a temporary file so a
 shell function can change the current shell's directory. Add this to `.zshrc`:
+
+The `sq` wrapper starts `turm` and changes the calling shell to the directory
+selected in the Workdir panel when `turm` exits. Use `sq` instead of `turm` for
+quick directory jumping, for example `sq --me`.
 
 ```zsh
 unalias sq 2>/dev/null
