@@ -22,7 +22,7 @@ impl App {
             ),
             job_list_state: TableState::new(),
             job_sort_field: JobSortField::Time,
-            job_sort_direction: SortDirection::Asc,
+            job_sort_direction: SortDirection::Desc,
             job_output: Ok("".to_string()),
             job_output_anchor: ScrollAnchor::Bottom,
             job_output_offset: 0,

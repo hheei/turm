@@ -113,6 +113,7 @@ pub(in crate::app) enum JobSortField {
     Name,
     User,
     Time,
+    Duration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -269,6 +270,12 @@ impl Job {
             Some(array_step) => format!("{}_{}", self.array_id, array_step),
             None => self.job_id.clone(),
         }
+    }
+
+    pub(in crate::app) fn is_terminal(&self) -> bool {
+        ["CA", "CD", "F", "OOM", "TO"]
+            .iter()
+            .any(|state| self.state_compact.eq_ignore_ascii_case(state))
     }
 }
 use super::*;

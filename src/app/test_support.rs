@@ -14,6 +14,7 @@ pub enum TestJobSortField {
     Name,
     User,
     Time,
+    Duration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

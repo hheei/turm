@@ -20,7 +20,12 @@ impl App {
             .map(|j| j.partition.len())
             .max()
             .unwrap_or(0);
-        let max_time_len = visible_jobs.iter().map(|j| j.time.len()).max().unwrap_or(0);
+        let max_start_time_len = visible_jobs
+            .iter()
+            .map(|j| j.start_time.len())
+            .max()
+            .unwrap_or(0);
+        let max_duration_len = visible_jobs.iter().map(|j| j.time.len()).max().unwrap_or(0);
         let max_state_compact_len = visible_jobs
             .iter()
             .map(|j| j.state_compact.len())
@@ -48,6 +53,12 @@ impl App {
             .border_type(BorderType::Rounded)
             .padding(Padding::horizontal(1))
             .border_style(Style::default().fg(Color::DarkGray));
+        let duration_indicator = self.sort_indicator(JobSortField::Duration);
+        let duration_indicator = if duration_indicator.is_empty() {
+            " "
+        } else {
+            duration_indicator
+        };
         let job_header = Row::new(vec![
             sort_header_cell("s", "t", self.sort_indicator(JobSortField::State)),
             sort_header_cell(
@@ -57,8 +68,39 @@ impl App {
             ),
             sort_header_cell("j", "obid", self.sort_indicator(JobSortField::Id)),
             sort_header_cell("n", "ame", self.sort_indicator(JobSortField::Name)),
-            sort_header_cell("u", "ser", self.sort_indicator(JobSortField::User)),
+            Cell::from(Line::from(Span::styled(
+                "user",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ))),
             sort_header_cell("t", "ime", self.sort_indicator(JobSortField::Time)),
+            Cell::from(Line::from(vec![
+                Span::styled(
+                    "d",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "u",
+                    Style::default()
+                        .fg(Color::Blue)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "ration",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    duration_indicator,
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ])),
         ]);
         let job_table_widths = [
             Constraint::Length((max_state_compact_len.max(3) as u16).min(8)),
@@ -66,7 +108,8 @@ impl App {
             Constraint::Length((max_id_len.max(6) as u16).min(12)),
             Constraint::Length((max_name_len.max(5) as u16).min(25)),
             Constraint::Length((max_user_len.max(5) as u16).min(12)),
-            Constraint::Length((max_time_len.max(5) as u16).min(12)),
+            Constraint::Length((max_start_time_len.max(5) as u16).min(19)),
+            Constraint::Length((max_duration_len.max(9) as u16).min(12)),
         ];
         let jobs: Vec<Row> = visible_jobs
             .iter()
@@ -87,11 +130,12 @@ impl App {
                         Style::default().fg(Color::Green),
                     ))),
                     Cell::from(Line::from(Span::styled(
-                        j.time.as_str(),
+                        j.start_time.as_str(),
                         Style::default().fg(Color::Red),
                     ))),
+                    Cell::from(j.time.as_str()),
                 ])
-                .style(if j.state_compact.eq_ignore_ascii_case("CD") {
+                .style(if j.is_terminal() {
                     Style::default().add_modifier(Modifier::DIM)
                 } else {
                     Style::default()

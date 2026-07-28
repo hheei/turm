@@ -45,13 +45,19 @@ impl App {
         let sort_direction = self.job_sort_direction;
 
         self.jobs.sort_by(|left, right| {
-            let completed_order = (left.state_compact.eq_ignore_ascii_case("CD"))
-                .cmp(&right.state_compact.eq_ignore_ascii_case("CD"));
+            let terminal_order = left.is_terminal().cmp(&right.is_terminal());
+            let missing_start_time_order = (sort_field == JobSortField::Time).then(|| {
+                normalized_start_time(&left.start_time)
+                    .is_none()
+                    .cmp(&normalized_start_time(&right.start_time).is_none())
+            });
             let ordering = compare_jobs_by_field(left, right, sort_field);
-            completed_order.then_with(|| match sort_direction {
-                SortDirection::Asc => ordering,
-                SortDirection::Desc => ordering.reverse(),
-            })
+            terminal_order
+                .then_with(|| missing_start_time_order.unwrap_or(Ordering::Equal))
+                .then_with(|| match sort_direction {
+                    SortDirection::Asc => ordering,
+                    SortDirection::Desc => ordering.reverse(),
+                })
         });
     }
 
@@ -92,7 +98,8 @@ fn compare_jobs_by_field(left: &Job, right: &Job, field: JobSortField) -> Orderi
         JobSortField::Id => compare_job_identity(left, right),
         JobSortField::Name => cmp_ignore_ascii_case(&left.name, &right.name),
         JobSortField::User => cmp_ignore_ascii_case(&left.user, &right.user),
-        JobSortField::Time => compare_job_time(left, right),
+        JobSortField::Time => compare_job_start_time(left, right),
+        JobSortField::Duration => compare_job_duration(left, right),
     }
     .then_with(|| compare_job_identity(left, right))
 }
@@ -105,7 +112,14 @@ fn compare_job_identity(left: &Job, right: &Job) -> Ordering {
         .then_with(|| cmp_ignore_ascii_case(&left.id(), &right.id()))
 }
 
-fn compare_job_time(left: &Job, right: &Job) -> Ordering {
+fn compare_job_start_time(left: &Job, right: &Job) -> Ordering {
+    compare_optional_string(
+        normalized_start_time(&left.start_time),
+        normalized_start_time(&right.start_time),
+    )
+}
+
+fn compare_job_duration(left: &Job, right: &Job) -> Ordering {
     compare_optional_u64(
         parse_slurm_duration(&left.time),
         parse_slurm_duration(&right.time),

@@ -208,7 +208,7 @@ impl App {
                                     Focus::Log => self.move_output_half_page_up(),
                                 }
                             } else if matches!(self.focus, Focus::Jobs) {
-                                self.update_job_sort(JobSortField::User);
+                                self.update_job_sort(JobSortField::Duration);
                             }
                         }
                         KeyCode::Char('d') => {

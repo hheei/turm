@@ -14,7 +14,7 @@ impl AppDriver {
                 active_filter: String::new(),
                 job_list_state: TableState::new().with_selected(selected),
                 job_sort_field: JobSortField::Time,
-                job_sort_direction: SortDirection::Asc,
+                job_sort_direction: SortDirection::Desc,
                 job_output: Ok(String::new()),
                 job_output_anchor: ScrollAnchor::Bottom,
                 job_output_offset: 0,
@@ -175,6 +175,7 @@ impl AppDriver {
             JobSortField::Name => TestJobSortField::Name,
             JobSortField::User => TestJobSortField::User,
             JobSortField::Time => TestJobSortField::Time,
+            JobSortField::Duration => TestJobSortField::Duration,
         }
     }
 
@@ -193,6 +194,7 @@ impl AppDriver {
             TestJobSortField::Name => JobSortField::Name,
             TestJobSortField::User => JobSortField::User,
             TestJobSortField::Time => JobSortField::Time,
+            TestJobSortField::Duration => JobSortField::Duration,
         };
         self.app.job_sort_direction = match direction {
             TestSortDirection::Asc => SortDirection::Asc,

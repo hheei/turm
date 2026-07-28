@@ -90,6 +90,7 @@ impl App {
         } else {
             Text::default()
         };
+        f.render_widget(Clear, area);
         let job_detail = Paragraph::new(text).block(block);
         f.render_widget(job_detail, area);
         self.job_details_area = area;
