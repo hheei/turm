@@ -1,3 +1,5 @@
 /target
+.orca/
+graphify-out/
 scripts/mock-slurm/logs/*
 !scripts/mock-slurm/logs/.gitkeep
