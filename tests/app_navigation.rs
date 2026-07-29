@@ -74,6 +74,25 @@ fn jobs_navigation_stays_in_jobs_focus() {
 }
 
 #[test]
+fn arrows_do_not_clear_workdir_for_single_job() {
+    let temp_root = std::env::temp_dir().join(format!("turm-single-job-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp_root);
+    std::fs::create_dir(&temp_root).unwrap();
+
+    let mut app = test_app(1, Some(0));
+    app.jobs_mut()[0].workdir = Some(temp_root.clone());
+    app.handle(AppMessage::Key(key('x')));
+    let entry_count = app.workdir_entry_count();
+
+    app.handle(AppMessage::Key(special_key(KeyCode::Up)));
+    app.handle(AppMessage::Key(special_key(KeyCode::Down)));
+
+    assert_eq!(app.selected_job_index(), Some(0));
+    assert_eq!(app.workdir_entry_count(), entry_count);
+    let _ = std::fs::remove_dir_all(temp_root);
+}
+
+#[test]
 fn enter_opens_output_file_or_changes_to_workdir() {
     let mut editor_app = test_app(1, Some(0));
     editor_app.set_output_mode(OutputPanelMode::Stdout);
@@ -426,7 +445,7 @@ fn details_selection_is_aware_of_wrapped_key_and_value_elements() {
         .find(|&y| row_text(&buffer, details, y).contains("TRES"))
         .unwrap();
     let key_x = details.x + 2;
-    let value_x = key_x + 9;
+    let value_x = key_x + 12;
 
     app.handle_input_event(Event::Mouse(MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),

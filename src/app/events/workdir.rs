@@ -112,6 +112,7 @@ impl App {
 
     pub(in crate::app) fn clamp_workdir_offset(&mut self) {
         let viewport_height = usize::from(self.output_layout().viewport.height);
+        let entry_viewport_height = viewport_height.saturating_sub(1);
         let content_height = if let Some(message) = self.workdir_message() {
             usize::from(!message.is_empty())
         } else {
@@ -125,10 +126,11 @@ impl App {
             } else if selected < self.workdir_offset {
                 self.workdir_offset = selected;
             } else {
-                let last_visible = self.workdir_offset + viewport_height.saturating_sub(1);
+                let last_visible = self.workdir_offset + entry_viewport_height.saturating_sub(1);
                 if selected > last_visible {
-                    self.workdir_offset =
-                        selected.saturating_add(1).saturating_sub(viewport_height);
+                    self.workdir_offset = selected
+                        .saturating_add(1)
+                        .saturating_sub(entry_viewport_height);
                 }
             }
         }

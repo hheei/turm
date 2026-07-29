@@ -152,6 +152,41 @@ impl App {
                         KeyCode::Tab => self.cycle_output_panel_mode(),
                         KeyCode::Left => self.focus_previous_panel(),
                         KeyCode::Right => self.focus_next_panel(),
+                        KeyCode::Up
+                            if key
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::SHIFT) =>
+                        {
+                            match self.focus {
+                                Focus::Resources => self
+                                    .resource_table_state
+                                    .scroll_up_by(self.resource_list_height.max(1)),
+                                Focus::Jobs => self
+                                    .job_list_state
+                                    .scroll_up_by(self.job_list_height.max(1)),
+                                Focus::Details => {}
+                                Focus::Log => {
+                                    self.move_output_up(self.output_layout().viewport.height.max(1))
+                                }
+                            }
+                        }
+                        KeyCode::Down
+                            if key
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::SHIFT) =>
+                        {
+                            match self.focus {
+                                Focus::Resources => self
+                                    .resource_table_state
+                                    .scroll_down_by(self.resource_list_height.max(1)),
+                                Focus::Jobs => self
+                                    .job_list_state
+                                    .scroll_down_by(self.job_list_height.max(1)),
+                                Focus::Details => {}
+                                Focus::Log => self
+                                    .move_output_down(self.output_layout().viewport.height.max(1)),
+                            }
+                        }
                         KeyCode::Char('k') | KeyCode::Up => match self.focus {
                             Focus::Resources => self.select_previous_resource(),
                             Focus::Jobs => self.select_previous_job(),

@@ -60,15 +60,33 @@ impl App {
     }
 
     pub(in crate::app) fn select_next_job(&mut self) {
-        if !self.visible_job_indices().is_empty() {
-            self.job_list_state.select_next();
+        let visible_job_count = self.visible_job_indices().len();
+        if visible_job_count == 0 {
+            return;
         }
+        let max_index = visible_job_count - 1;
+        let next = self
+            .job_list_state
+            .selected()
+            .unwrap_or(0)
+            .saturating_add(1)
+            .min(max_index);
+        self.job_list_state.select(Some(next));
     }
 
     pub(in crate::app) fn select_previous_job(&mut self) {
-        if !self.visible_job_indices().is_empty() {
-            self.job_list_state.select_previous();
+        let visible_job_count = self.visible_job_indices().len();
+        if visible_job_count == 0 {
+            return;
         }
+        let max_index = visible_job_count - 1;
+        let previous = self
+            .job_list_state
+            .selected()
+            .unwrap_or(0)
+            .min(max_index)
+            .saturating_sub(1);
+        self.job_list_state.select(Some(previous));
     }
 
     pub(in crate::app) fn select_first_job(&mut self) {
@@ -84,14 +102,30 @@ impl App {
     }
 
     pub(in crate::app) fn select_next_resource(&mut self) {
-        if !self.resources.is_empty() {
-            self.resource_table_state.select_next();
+        let resource_count = self.resources.len();
+        if resource_count > 0 {
+            let max_index = resource_count - 1;
+            let next = self
+                .resource_table_state
+                .selected()
+                .unwrap_or(0)
+                .saturating_add(1)
+                .min(max_index);
+            self.resource_table_state.select(Some(next));
         }
     }
 
     pub(in crate::app) fn select_previous_resource(&mut self) {
-        if !self.resources.is_empty() {
-            self.resource_table_state.select_previous();
+        let resource_count = self.resources.len();
+        if resource_count > 0 {
+            let max_index = resource_count - 1;
+            let previous = self
+                .resource_table_state
+                .selected()
+                .unwrap_or(0)
+                .min(max_index)
+                .saturating_sub(1);
+            self.resource_table_state.select(Some(previous));
         }
     }
 

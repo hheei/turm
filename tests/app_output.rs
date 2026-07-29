@@ -174,6 +174,39 @@ fn output_vertical_scrollbar_matches_top_and_bottom_positions() {
 }
 
 #[test]
+fn workdir_last_entry_is_visible_and_scrollbar_reaches_bottom() {
+    let mut app = test_app(1, Some(0));
+    app.set_output_mode(OutputPanelMode::Workdir);
+    app.set_focus(Focus::Log);
+    app.set_workdir_entries(
+        (0..30)
+            .map(|index| WorkdirEntry {
+                name: format!("entry-{index}"),
+                path: PathBuf::from(format!("/tmp/turm-entry-{index}")),
+                kind: WorkdirEntryKind::File,
+            })
+            .collect(),
+    );
+    app.set_workdir_selected(Some(0));
+    let _ = draw_app(&mut app, 40, 29);
+    for _ in 1..30 {
+        app.handle(AppMessage::Key(special_key(KeyCode::Down)));
+    }
+
+    let buffer = draw_app(&mut app, 40, 29);
+    let text = buffer_text(&buffer, 40, 29);
+    assert!(text.contains("entry-29"));
+    assert_eq!(app.workdir_selected(), Some(29));
+
+    let scrollbar = output_vertical_scrollbar_area(&app).unwrap();
+    let thumb_rows = symbol_rows(&buffer, scrollbar, VERTICAL_SCROLLBAR_THUMB);
+    assert_eq!(
+        thumb_rows.last(),
+        Some(&(scrollbar.y + scrollbar.height - 1))
+    );
+}
+
+#[test]
 fn changing_selected_job_resets_tail_position() {
     let mut app = test_app(4, Some(0));
     app.set_output_mode(OutputPanelMode::Stdout);
@@ -238,7 +271,17 @@ fn help_line_shows_global_output_switch() {
     let mut jobs_app = test_app(3, Some(0));
     let jobs_text = buffer_text(&draw_app(&mut jobs_app, 120, 21), 120, 21);
     assert!(!jobs_text.contains("mode:"));
-    assert!(jobs_text.contains("⌃c path"));
+    assert!(jobs_text.contains("c path"));
+    assert!(!jobs_text.contains("⌃c"));
+    assert!(jobs_text.find("c path") < jobs_text.find("d detail"));
+    assert!(
+        jobs_text
+            .lines()
+            .nth(19)
+            .unwrap()
+            .trim_end()
+            .ends_with("set time")
+    );
     assert!(jobs_text.contains("⌃r rename"));
     assert!(jobs_text.contains("d detail"));
 
@@ -295,6 +338,35 @@ fn log_focus_routes_navigation_to_log_scrolling() {
 
     app.handle(AppMessage::Key(key('w')));
     assert!(app.output_wrap());
+}
+
+#[test]
+fn shift_output_arrows_scroll_by_a_page() {
+    let mut app = test_app(1, Some(0));
+    let _ = draw_app(&mut app, 40, 29);
+    app.set_output_mode(OutputPanelMode::Stdout);
+    app.set_focus(Focus::Log);
+    app.set_job_output(
+        (0..100)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    app.set_output_anchor(ScrollAnchor::Top);
+    app.set_output_offset(0);
+    let page = app.layout().viewport.height;
+
+    app.handle(AppMessage::Key(KeyEvent::new(
+        KeyCode::Up,
+        crossterm::event::KeyModifiers::SHIFT,
+    )));
+    assert_eq!(app.output_offset(), 0);
+
+    app.handle(AppMessage::Key(KeyEvent::new(
+        KeyCode::Down,
+        crossterm::event::KeyModifiers::SHIFT,
+    )));
+    assert_eq!(app.output_offset(), page);
 }
 
 #[test]
