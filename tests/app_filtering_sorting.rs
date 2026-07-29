@@ -20,6 +20,10 @@ fn sort_keys_toggle_direction_and_switch_fields() {
     app.handle(AppMessage::Key(key('j')));
     assert_eq!(app.sort_field(), JobSortField::Id);
     assert_eq!(app.sort_direction(), SortDirection::Desc);
+
+    app.handle(AppMessage::Key(key('u')));
+    assert_eq!(app.sort_field(), JobSortField::Duration);
+    assert_eq!(app.sort_direction(), SortDirection::Desc);
 }
 
 #[test]
@@ -28,13 +32,18 @@ fn header_renders_active_sort_indicator() {
     let buffer = draw_app(&mut app, 120, 12);
     let header_y = app.job_list_area().y.saturating_add(1);
     let header_text = row_text(&buffer, app.job_list_area(), header_y);
-    assert!(header_text.contains("time▲"), "header was {header_text}");
+    assert!(header_text.contains("time▼"), "header was {header_text}");
 
     app.handle(AppMessage::Key(key('n')));
     app.handle(AppMessage::Key(key('n')));
     let buffer = draw_app(&mut app, 120, 12);
     let header_text = row_text(&buffer, app.job_list_area(), header_y);
     assert!(header_text.contains("name▲"), "header was {header_text}");
+
+    app.handle(AppMessage::Key(key('u')));
+    let buffer = draw_app(&mut app, 120, 12);
+    let header_text = row_text(&buffer, app.job_list_area(), header_y);
+    assert!(header_text.contains("uration▼"), "header was {header_text}");
 }
 
 #[test]
@@ -55,6 +64,19 @@ fn sorting_job_ids_is_numeric() {
 }
 
 #[test]
+fn sorting_durations_uses_numeric_slurm_duration_ordering() {
+    let mut jobs = vec![test_job(0), test_job(1), test_job(2)];
+    jobs[0].time = "02:00:00".to_string();
+    jobs[1].time = "1-00:00:00".to_string();
+    jobs[2].time = "12:00:00".to_string();
+
+    let mut app = app_with_jobs(jobs, Some(0));
+    app.set_sort(JobSortField::Duration, SortDirection::Desc);
+    app.sort_jobs();
+
+    assert_eq!(app.job_ids(), vec!["1001", "1002", "1000"]);
+}
+#[test]
 fn sorting_preserves_selected_job_by_id() {
     let mut jobs = vec![test_job(0), test_job(1), test_job(2)];
     jobs[0].name = "alpha".to_string();
@@ -70,12 +92,27 @@ fn sorting_preserves_selected_job_by_id() {
 }
 
 #[test]
-fn default_time_sort_places_completed_jobs_last() {
+fn default_sort_orders_jobs_by_start_time_newest_first() {
+    let mut jobs = vec![test_job(0), test_job(1), test_job(2), test_job(3)];
+    jobs[0].start_time = "2025-04-01T10:00:00".to_string();
+    jobs[1].start_time = "2025-04-03T08:00:00".to_string();
+    jobs[2].start_time = "2025-04-02T12:00:00".to_string();
+    jobs[3].start_time = "N/A".to_string();
+
+    let mut app = app_with_jobs(jobs, Some(0));
+    app.sort_jobs();
+
+    assert_eq!(app.sort_field(), JobSortField::Time);
+    assert_eq!(app.sort_direction(), SortDirection::Desc);
+    assert_eq!(app.job_ids(), vec!["1001", "1002", "1000", "1003"]);
+}
+#[test]
+fn time_sort_keeps_terminal_jobs_last() {
     let mut jobs = vec![test_job(0), test_job(1), test_job(2)];
-    jobs[0].time = "00:01:00".to_string();
-    jobs[1].time = "00:03:00".to_string();
+    jobs[0].start_time = "2025-04-01T10:00:00".to_string();
+    jobs[1].start_time = "2025-04-03T08:00:00".to_string();
     jobs[1].state_compact = "CD".to_string();
-    jobs[2].time = "00:02:00".to_string();
+    jobs[2].start_time = "2025-04-02T12:00:00".to_string();
 
     let mut app = app_with_jobs(jobs, Some(0));
     app.set_sort(JobSortField::Time, SortDirection::Asc);
@@ -97,6 +134,23 @@ fn completed_jobs_stay_last_for_explicit_sorting() {
     app.sort_jobs();
 
     assert_eq!(app.job_ids(), vec!["1002", "1000", "1001"]);
+}
+
+#[test]
+fn completed_and_timeout_jobs_sort_together_at_the_end() {
+    let mut jobs = vec![test_job(0), test_job(1), test_job(2), test_job(3)];
+    jobs[0].name = "zeta".to_string();
+    jobs[1].name = "timeout".to_string();
+    jobs[1].state_compact = "TO".to_string();
+    jobs[2].name = "alpha".to_string();
+    jobs[2].state_compact = "CD".to_string();
+    jobs[3].name = "beta".to_string();
+
+    let mut app = app_with_jobs(jobs, Some(0));
+    app.set_sort(JobSortField::Name, SortDirection::Asc);
+    app.sort_jobs();
+
+    assert_eq!(app.job_ids(), vec!["1003", "1000", "1002", "1001"]);
 }
 
 #[test]

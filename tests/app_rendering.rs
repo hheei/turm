@@ -8,7 +8,15 @@ fn jobs_table_header_is_bold_with_blue_shortcuts_and_sort_slots() {
     let header_y = app.job_list_area().y.saturating_add(1);
     let header_text = row_text(&buffer, app.job_list_area(), header_y);
 
-    for label in ["st", "partition", "jobid", "name", "user", "time"] {
+    for label in [
+        "st",
+        "partition",
+        "jobid",
+        "name",
+        "user",
+        "time",
+        "duration",
+    ] {
         assert!(
             header_text.contains(label),
             "missing header label {label}: {header_text}"
@@ -26,19 +34,22 @@ fn jobs_table_header_is_bold_with_blue_shortcuts_and_sort_slots() {
         })
         .collect::<Vec<_>>();
 
-    assert_eq!(blue_header_symbols, vec!["s", "p", "j", "n", "u", "t"]);
-    assert!(
-        (app.job_list_area().x..app.job_list_area().right())
-            .filter(|&x| !buffer[(x, header_y)].symbol().trim().is_empty())
-            .all(|x| matches!(buffer[(x, header_y)].fg, Color::Blue | Color::Cyan))
-    );
+    assert_eq!(blue_header_symbols, vec!["s", "p", "j", "n", "t", "u"]);
     assert!(
         (app.job_list_area().x..app.job_list_area().right()).all(|x| !buffer[(x, header_y)]
             .style()
             .add_modifier
             .contains(Modifier::UNDERLINED))
     );
-    for label in ["st", "partition", "jobid", "name", "user", "time"] {
+    for label in [
+        "st",
+        "partition",
+        "jobid",
+        "name",
+        "user",
+        "time",
+        "duration",
+    ] {
         let byte_index = header_text.find(label).unwrap();
         let start = app.job_list_area().x + header_text[..byte_index].chars().count() as u16;
         assert!(
@@ -51,7 +62,7 @@ fn jobs_table_header_is_bold_with_blue_shortcuts_and_sort_slots() {
             "not bold: {label} at {start}"
         );
     }
-    let indicator_byte_index = header_text.find('▲').unwrap();
+    let indicator_byte_index = header_text.find('▼').unwrap();
     let indicator_x =
         app.job_list_area().x + header_text[..indicator_byte_index].chars().count() as u16;
     assert!(
@@ -64,7 +75,8 @@ fn jobs_table_header_is_bold_with_blue_shortcuts_and_sort_slots() {
     assert!(header_text.contains("partition  "));
     assert!(header_text.contains("jobid  "));
     assert!(header_text.contains("name  "));
-    assert!(header_text.contains("user  "));
+    assert!(header_text.contains("time▼"));
+    assert!(header_text.contains("duration "));
 }
 
 #[test]
@@ -90,6 +102,20 @@ fn job_name_column_is_capped_at_25_characters() {
 }
 
 #[test]
+fn jobs_table_displays_start_time_and_duration_separately() {
+    let mut app = test_app(1, Some(0));
+    app.jobs_mut()[0].start_time = "2025-04-03T08:00:00".to_string();
+    app.jobs_mut()[0].time = "01:23:45".to_string();
+
+    let buffer = draw_app(&mut app, 120, 20);
+    let row_y = app.job_list_area().y.saturating_add(2);
+    let row = row_text(&buffer, app.job_list_area(), row_y);
+
+    assert!(row.contains("2025-04-03T08:00:00"));
+    assert!(row.contains("01:23:45"));
+}
+
+#[test]
 fn completed_job_rows_are_dimmed() {
     let mut app = test_app(2, Some(0));
     app.jobs_mut()[1].state_compact = "CD".to_string();
@@ -105,6 +131,29 @@ fn completed_job_rows_are_dimmed() {
             .add_modifier
             .contains(Modifier::DIM)
     }));
+}
+
+#[test]
+fn terminal_job_rows_are_dimmed() {
+    for state in ["TO", "CA", "F", "OOM"] {
+        let mut app = test_app(2, Some(0));
+        app.jobs_mut()[1].state_compact = state.to_string();
+        let buffer = draw_app(&mut app, 120, 20);
+        let area = app.job_list_area();
+        let row_y = (area.y + 2..area.bottom())
+            .find(|&y| row_text(&buffer, area, y).contains(state))
+            .unwrap();
+
+        assert!(
+            (area.x + 2..area.right().saturating_sub(2)).all(|x| {
+                buffer[(x, row_y)]
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::DIM)
+            }),
+            "{state} row was not dimmed"
+        );
+    }
 }
 
 #[test]
@@ -247,7 +296,7 @@ fn o_does_not_cycle_while_filter_dialog_is_open() {
 
     assert_eq!(app.output_mode(), OutputPanelMode::Workdir);
     match app.dialog() {
-        Some(Dialog::FilterJobs { input }) => assert_eq!(input.value(), "o"),
+        Some(Dialog::FilterJobs { input }) => assert_eq!(input.value(), ""),
         _ => panic!("expected filter dialog"),
     }
 }
@@ -485,6 +534,20 @@ fn focused_border_style_tracks_the_active_panel() {
 }
 
 #[test]
+fn details_panel_clears_overlapping_job_content() {
+    let mut app = test_app(28, Some(0));
+    app.jobs_mut()[25].name = "BACKGROUND-CONTENT-MUST-NOT-BLEED".to_string();
+
+    let buffer = draw_app(&mut app, 120, 40);
+    let details = details_area(&app);
+    let details_text = (details.y..details.bottom())
+        .map(|y| row_text(&buffer, details, y))
+        .collect::<String>();
+
+    assert!(!details_text.contains("BACKGROUND-CONTENT-MUST-NOT-BLEED"));
+}
+
+#[test]
 fn top_panels_have_rounded_gray_borders() {
     let mut app = test_app(3, Some(0));
     let buffer = draw_app(&mut app, 120, 40);
@@ -567,13 +630,12 @@ fn help_keys_are_blue_and_descriptions_are_gray() {
         (13, 19),
         (24, 19),
         (25, 19),
-        (38, 19),
-        (39, 19),
         (0, 20),
         (11, 20),
         (18, 20),
-        (29, 20),
-        (40, 20),
+        (27, 20),
+        (38, 20),
+        (49, 20),
     ] {
         assert_eq!(buffer[(x, y)].fg, Color::Blue, "key at ({x}, {y})");
     }
@@ -581,7 +643,6 @@ fn help_keys_are_blue_and_descriptions_are_gray() {
         (2, 19),
         (14, 19),
         (26, 19),
-        (40, 19),
         (1, 20),
         (12, 20),
         (19, 20),

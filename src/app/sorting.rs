@@ -127,6 +127,20 @@ fn compare_job_duration(left: &Job, right: &Job) -> Ordering {
     .then_with(|| cmp_ignore_ascii_case(&left.time, &right.time))
 }
 
+fn normalized_start_time(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty() && !value.eq_ignore_ascii_case("N/A")).then_some(value)
+}
+
+fn compare_optional_string(left: Option<&str>, right: Option<&str>) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => cmp_ignore_ascii_case(left, right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
 fn compare_numeric_string(left: &str, right: &str) -> Ordering {
     match (left.parse::<u64>(), right.parse::<u64>()) {
         (Ok(left), Ok(right)) => left.cmp(&right),
@@ -150,12 +164,6 @@ fn compare_optional_u64(left: Option<u64>, right: Option<u64>) -> Ordering {
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,
     }
-}
-
-fn cmp_ignore_ascii_case(left: &str, right: &str) -> Ordering {
-    left.bytes()
-        .map(|byte| byte.to_ascii_lowercase())
-        .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
 }
 
 fn parse_slurm_duration(value: &str) -> Option<u64> {
@@ -182,4 +190,10 @@ fn parse_slurm_duration(value: &str) -> Option<u64> {
     };
 
     Some(days * 86_400 + hours * 3_600 + minutes * 60 + seconds)
+}
+
+fn cmp_ignore_ascii_case(left: &str, right: &str) -> Ordering {
+    left.bytes()
+        .map(|byte| byte.to_ascii_lowercase())
+        .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
 }
