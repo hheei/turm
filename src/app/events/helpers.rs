@@ -210,14 +210,9 @@ pub(in crate::app) fn cancel_confirmation_action(
             ConfirmCancelChoice::Yes => CancelConfirmationAction::Confirm,
             ConfirmCancelChoice::No => CancelConfirmationAction::Cancel,
         },
-        KeyCode::Left | KeyCode::Char('h') => {
-            CancelConfirmationAction::Select(ConfirmCancelChoice::No)
-        }
-        KeyCode::Right | KeyCode::Char('l') => {
-            CancelConfirmationAction::Select(ConfirmCancelChoice::Yes)
-        }
-        KeyCode::Char('y') | KeyCode::Char('Y') => CancelConfirmationAction::Confirm,
-        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => CancelConfirmationAction::Cancel,
+        KeyCode::Left => CancelConfirmationAction::Select(ConfirmCancelChoice::Yes),
+        KeyCode::Right => CancelConfirmationAction::Select(ConfirmCancelChoice::No),
+        KeyCode::Char('q') | KeyCode::Esc => CancelConfirmationAction::Cancel,
         _ => CancelConfirmationAction::Ignore,
     }
 }
@@ -235,7 +230,7 @@ pub(in crate::app) fn copy_job_output_directory_action(
 ) -> CopyJobOutputDirectoryAction {
     match key.code {
         KeyCode::Char('d') => CopyJobOutputDirectoryAction::CopyDirUrl,
-        KeyCode::Char('c') => CopyJobOutputDirectoryAction::CopyDirName,
+        KeyCode::Char('c') if key.modifiers.is_empty() => CopyJobOutputDirectoryAction::CopyDirName,
         KeyCode::Esc => CopyJobOutputDirectoryAction::Cancel,
         _ => CopyJobOutputDirectoryAction::Ignore,
     }

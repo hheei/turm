@@ -10,7 +10,7 @@ impl App {
                 vec![("c", "dir-name"), ("d", "dir-url"), ("⎋", "cancel")]
             }
             Some(Dialog::ConfirmCancelJob { .. }) => {
-                vec![("←/→", "choose"), ("enter", "confirm"), ("esc", "close")]
+                vec![("←/→", "focus"), ("enter", "confirm"), ("esc/q", "close")]
             }
             Some(Dialog::EditJobName { .. }) => {
                 vec![("enter", "apply"), ("esc", "cancel")]
@@ -27,9 +27,7 @@ impl App {
                 Span::styled("⌃d", key_style),
                 Span::styled(" cancel · ", text_style),
                 Span::styled("⌃t", key_style),
-                Span::styled(" set time · ", text_style),
-                Span::styled("⌃c", key_style),
-                Span::styled(" path", text_style),
+                Span::styled(" set time", text_style),
             ]);
             let enter_action = match self.output_panel_mode {
                 OutputPanelMode::Stdout | OutputPanelMode::Stderr => "edit",
@@ -40,6 +38,8 @@ impl App {
                 Span::styled(" toggle · ", text_style),
                 Span::styled("↵", key_style),
                 Span::styled(format!(" {enter_action} · "), text_style),
+                Span::styled("c", key_style),
+                Span::styled(" path · ", text_style),
                 Span::styled("d", key_style),
                 Span::styled(" detail · ", text_style),
                 Span::styled("f", key_style),

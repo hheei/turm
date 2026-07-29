@@ -193,11 +193,11 @@ fn cancel_confirmation_popup_renders_job_details_and_buttons() {
     )));
 
     let text = buffer_text(&draw_app(&mut app, 120, 20), 120, 20);
-    assert!(text.contains("Cancel selected job?"));
+    assert!(text.contains("─ Cancel Job ─"));
     assert!(text.contains("Job 101512"));
     assert!(text.contains("vasp-alpha"));
-    assert!(text.contains("[N]o"));
-    assert!(text.contains("[Y]es"));
+    assert!(text.contains("Yes"));
+    assert!(text.contains("No"));
 }
 
 #[test]
@@ -212,8 +212,23 @@ fn cancel_confirmation_defaults_to_no_and_enter_closes_safely() {
 }
 
 #[test]
+fn time_limit_dialog_uses_actual_limit_as_ghost_text() {
+    let mut app = filtered_jobs_app();
+    app.handle(AppMessage::Key(key_with_modifiers(
+        't',
+        crossterm::event::KeyModifiers::CONTROL,
+    )));
+
+    let text = buffer_text(&draw_app(&mut app, 120, 20), 120, 20);
+    assert!(text.contains("─ Time Limit ─"));
+    assert!(text.contains("01:00:00"));
+    assert!(!text.contains("maximum"));
+    assert!(!text.contains("Set time limit for job"));
+}
+
+#[test]
 fn cancel_confirmation_accepts_safe_close_keys() {
-    for key_event in [key('n'), key('N'), special_key(KeyCode::Esc)] {
+    for key_event in [key('q'), special_key(KeyCode::Esc)] {
         let mut app = filtered_jobs_app();
         app.handle(AppMessage::Key(key_with_modifiers(
             'd',
@@ -232,7 +247,7 @@ fn cancel_confirmation_arrow_keys_change_selection() {
         'd',
         crossterm::event::KeyModifiers::CONTROL,
     )));
-    app.handle(AppMessage::Key(special_key(KeyCode::Right)));
+    app.handle(AppMessage::Key(special_key(KeyCode::Left)));
 
     match app.dialog() {
         Some(Dialog::ConfirmCancelJob { selected, .. }) => {
@@ -241,7 +256,7 @@ fn cancel_confirmation_arrow_keys_change_selection() {
         _ => panic!("expected confirm cancel dialog"),
     }
 
-    app.handle(AppMessage::Key(special_key(KeyCode::Left)));
+    app.handle(AppMessage::Key(special_key(KeyCode::Right)));
     match app.dialog() {
         Some(Dialog::ConfirmCancelJob { selected, .. }) => {
             assert_eq!(*selected, ConfirmCancelChoice::No)
@@ -257,15 +272,23 @@ fn cancel_confirmation_maps_yes_keys_without_running_scancel() {
     for key_event in [key('y'), key('Y')] {
         assert_eq!(
             cancel_confirmation_action(key_event, ConfirmCancelChoice::No),
-            CancelConfirmationAction::Confirm
+            CancelConfirmationAction::Ignore
         );
     }
+    assert_eq!(
+        cancel_confirmation_action(key('n'), ConfirmCancelChoice::No),
+        CancelConfirmationAction::Ignore
+    );
     assert_eq!(
         cancel_confirmation_action(special_key(KeyCode::Enter), ConfirmCancelChoice::Yes),
         CancelConfirmationAction::Confirm
     );
     assert_eq!(
         cancel_confirmation_action(special_key(KeyCode::Enter), ConfirmCancelChoice::No),
+        CancelConfirmationAction::Cancel
+    );
+    assert_eq!(
+        cancel_confirmation_action(key('q'), ConfirmCancelChoice::No),
         CancelConfirmationAction::Cancel
     );
 }
@@ -276,12 +299,37 @@ fn r_opens_rename_dialog_with_existing_job_name() {
     app.handle(AppMessage::Key(key('r')));
 
     match app.dialog() {
-        Some(Dialog::EditJobName { id, input }) => {
+        Some(Dialog::EditJobName { id, input, .. }) => {
             assert_eq!(id, "101512");
-            assert_eq!(input.value(), "vasp-alpha");
+            assert_eq!(input.value(), "");
         }
         _ => panic!("expected rename dialog"),
     }
+
+    let text = buffer_text(&draw_app(&mut app, 120, 20), 120, 20);
+    assert!(text.contains("─ Rename Job ─"));
+    assert!(!text.contains("Set name for job"));
+    let title_line = text
+        .lines()
+        .position(|line| line.contains("Rename Job"))
+        .unwrap();
+    assert!(
+        text.lines()
+            .nth(title_line + 1)
+            .unwrap()
+            .contains("vasp-alpha")
+    );
+
+    app.handle(AppMessage::Key(key('x')));
+    let text = buffer_text(&draw_app(&mut app, 120, 20), 120, 20);
+    assert!(text.lines().nth(title_line + 1).unwrap().contains("x"));
+    assert!(
+        !text
+            .lines()
+            .nth(title_line + 1)
+            .unwrap()
+            .contains("vasp-alpha")
+    );
 }
 
 #[test]

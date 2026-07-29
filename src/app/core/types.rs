@@ -16,10 +16,12 @@ pub enum Dialog {
     },
     EditTimeLimit {
         id: String,
+        maximum: String,
         input: Input,
     },
     EditJobName {
         id: String,
+        original_name: String,
         input: Input,
     },
     FilterJobs {

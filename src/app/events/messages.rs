@@ -52,7 +52,7 @@ impl App {
                             }
                             CancelConfirmationAction::Ignore => {}
                         },
-                        Dialog::EditTimeLimit { id, input } => match key.code {
+                        Dialog::EditTimeLimit { id, input, .. } => match key.code {
                             KeyCode::Enter => {
                                 if let Some(time_limit) = validated_time_limit(input) {
                                     timelimit_request = Some((id.clone(), time_limit));
@@ -66,7 +66,7 @@ impl App {
                                 input.handle_event(&Event::Key(key));
                             }
                         },
-                        Dialog::EditJobName { id, input } => match key.code {
+                        Dialog::EditJobName { id, input, .. } => match key.code {
                             KeyCode::Enter => {
                                 let job_name = input.value().trim();
                                 if !job_name.is_empty() {
@@ -258,16 +258,8 @@ impl App {
                             self.scroll_output_page_right();
                         }
                         KeyCode::Char('c')
-                            if key
-                                .modifiers
-                                .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                            if matches!(self.focus, Focus::Jobs) && key.modifiers.is_empty() =>
                         {
-                            if let Some(value) = self.selected_mouse_text() {
-                                self.pending_clipboard_copy = Some(value);
-                                self.clear_mouse_selection();
-                            }
-                        }
-                        KeyCode::Char('c') if matches!(self.focus, Focus::Jobs) => {
                             self.dialog = self.copy_job_output_directory_dialog();
                         }
                         KeyCode::Char('r')
@@ -279,7 +271,8 @@ impl App {
                             if let Some(job) = self.selected_job() {
                                 self.dialog = Some(Dialog::EditJobName {
                                     id: job.id(),
-                                    input: Input::new(job.name.clone()),
+                                    original_name: job.name.clone(),
+                                    input: Input::new(String::new()),
                                 });
                             }
                         }
@@ -291,7 +284,8 @@ impl App {
                             if let Some(job) = self.selected_job() {
                                 self.dialog = Some(Dialog::EditTimeLimit {
                                     id: job.id(),
-                                    input: Input::new(job.time_limit.clone()),
+                                    maximum: job.time_limit.clone(),
+                                    input: Input::new(String::new()),
                                 });
                             }
                         }
