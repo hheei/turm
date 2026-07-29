@@ -31,6 +31,10 @@ fn resources_show_group_usage_and_dim_unavailable_partitions() {
             running_nodes: 8,
             group_used_nodes: 3,
             available_nodes: 2,
+            cpus_per_node: "64".into(),
+            gpus_per_node: "gpu:2".into(),
+            time_limit: "1-00:00:00".into(),
+            memory_per_node: "512G".into(),
         },
         turm::test_support::ResourceSnapshot {
             partition: "full".to_string(),
@@ -38,6 +42,10 @@ fn resources_show_group_usage_and_dim_unavailable_partitions() {
             running_nodes: 12,
             group_used_nodes: 4,
             available_nodes: 0,
+            cpus_per_node: "128".into(),
+            gpus_per_node: "N/A".into(),
+            time_limit: "2-00:00:00".into(),
+            memory_per_node: "1T".into(),
         },
     ]);
     let buffer = draw_app(&mut app, 120, 20);
@@ -55,6 +63,37 @@ fn resources_show_group_usage_and_dim_unavailable_partitions() {
             .add_modifier
             .contains(Modifier::DIM)
     }));
+}
+
+#[test]
+fn resources_focus_shows_selected_partition_details() {
+    let mut app = test_app(1, Some(0));
+    app.set_resources(vec![turm::test_support::ResourceSnapshot {
+        partition: "gpu".into(),
+        total_nodes: 4,
+        running_nodes: 1,
+        group_used_nodes: 1,
+        available_nodes: 3,
+        cpus_per_node: "64".into(),
+        gpus_per_node: "gpu:8".into(),
+        time_limit: "7-00:00:00".into(),
+        memory_per_node: "512G".into(),
+    }]);
+    app.handle(AppMessage::Key(special_key(KeyCode::Left)));
+
+    let text = buffer_text(&draw_app(&mut app, 120, 40), 120, 40);
+    for detail in [
+        "Partition",
+        "CPU/node",
+        "GPU/node",
+        "Timelimit",
+        "Memory/node",
+    ] {
+        assert!(text.contains(detail), "missing partition detail {detail}");
+    }
+    assert!(text.contains("gpu:8"));
+    assert!(text.contains("7-00:00:00"));
+    assert!(text.contains("512G"));
 }
 
 #[test]

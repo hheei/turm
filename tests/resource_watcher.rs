@@ -160,6 +160,17 @@ fn plain_parser_groups_by_partition() {
 }
 
 #[test]
+fn plain_parser_formats_memory_without_mixed_values() {
+    let resources = parse_sinfo_text(
+        "gpu|alloc|1|64|gpu:8|1-00:00:00|766100M\n\
+         gpu|idle|1|64|gpu:8|1-00:00:00|800000M\n",
+    );
+
+    assert_eq!(resources[0].memory_per_node, "766.1G");
+    assert_ne!(resources[0].memory_per_node, "mixed");
+}
+
+#[test]
 fn sort_resources_orders_by_total_then_available() {
     let resources = sort_resource_snapshots(vec![
         ResourceSnapshot {
@@ -168,6 +179,10 @@ fn sort_resources_orders_by_total_then_available() {
             running_nodes: 20,
             group_used_nodes: 2,
             available_nodes: 5,
+            cpus_per_node: "N/A".into(),
+            gpus_per_node: "N/A".into(),
+            time_limit: "N/A".into(),
+            memory_per_node: "N/A".into(),
         },
         ResourceSnapshot {
             partition: "B".into(),
@@ -175,6 +190,10 @@ fn sort_resources_orders_by_total_then_available() {
             running_nodes: 2,
             group_used_nodes: 1,
             available_nodes: 10,
+            cpus_per_node: "N/A".into(),
+            gpus_per_node: "N/A".into(),
+            time_limit: "N/A".into(),
+            memory_per_node: "N/A".into(),
         },
         ResourceSnapshot {
             partition: "C".into(),
@@ -182,6 +201,10 @@ fn sort_resources_orders_by_total_then_available() {
             running_nodes: 3,
             group_used_nodes: 0,
             available_nodes: 0,
+            cpus_per_node: "N/A".into(),
+            gpus_per_node: "N/A".into(),
+            time_limit: "N/A".into(),
+            memory_per_node: "N/A".into(),
         },
         ResourceSnapshot {
             partition: "D".into(),
@@ -189,6 +212,10 @@ fn sort_resources_orders_by_total_then_available() {
             running_nodes: 17,
             group_used_nodes: 4,
             available_nodes: 8,
+            cpus_per_node: "N/A".into(),
+            gpus_per_node: "N/A".into(),
+            time_limit: "N/A".into(),
+            memory_per_node: "N/A".into(),
         },
     ]);
     assert_eq!(resources[0].partition, "C");

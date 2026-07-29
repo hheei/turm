@@ -77,6 +77,10 @@ pub struct ResourceSnapshot {
     pub running_nodes: u32,
     pub group_used_nodes: u32,
     pub available_nodes: u32,
+    pub cpus_per_node: String,
+    pub gpus_per_node: String,
+    pub time_limit: String,
+    pub memory_per_node: String,
 }
 
 pub struct AppDriver {

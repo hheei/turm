@@ -241,6 +241,10 @@ pub(crate) struct PartitionResources {
     pub(crate) running_nodes: u32,
     pub(crate) group_used_nodes: u32,
     pub(crate) available_nodes: u32,
+    pub(crate) cpus_per_node: String,
+    pub(crate) gpus_per_node: String,
+    pub(crate) time_limit: String,
+    pub(crate) memory_per_node: String,
 }
 
 pub struct Job {

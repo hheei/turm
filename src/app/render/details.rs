@@ -9,71 +9,91 @@ impl App {
             .padding(Padding::horizontal(1))
             .border_style(Style::default().fg(Color::DarkGray));
         let inner = block.inner(area);
-        let job_detail = self.selected_job().map(|j| {
-            let mut lines = Vec::new();
-            let mut groups = Vec::new();
-            let mut group = 0;
-            append_detail(
-                &mut lines,
-                &mut groups,
-                group,
-                "State",
-                &j.state,
-                inner.width,
-            );
-            if j.state == "PENDING" {
+        let detail = if self.focus == Focus::Resources {
+            self.selected_resource().map(|resource| {
+                let mut lines = Vec::new();
+                let mut groups = Vec::new();
+                for (group, (label, value)) in [
+                    ("Partition", resource.partition.as_str()),
+                    ("CPU/node", resource.cpus_per_node.as_str()),
+                    ("GPU/node", resource.gpus_per_node.as_str()),
+                    ("Timelimit", resource.time_limit.as_str()),
+                    ("Memory/node", resource.memory_per_node.as_str()),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    append_detail(&mut lines, &mut groups, group, label, value, inner.width);
+                }
+                (Text::from(lines), groups)
+            })
+        } else {
+            self.selected_job().map(|j| {
+                let mut lines = Vec::new();
+                let mut groups = Vec::new();
+                let mut group = 0;
+                append_detail(
+                    &mut lines,
+                    &mut groups,
+                    group,
+                    "State",
+                    &j.state,
+                    inner.width,
+                );
+                if j.state == "PENDING" {
+                    group += 1;
+                    append_detail(
+                        &mut lines,
+                        &mut groups,
+                        group,
+                        "Start",
+                        &j.start_time,
+                        inner.width,
+                    );
+                }
+                if let Some(s) = j.reason.as_deref() {
+                    group += 1;
+                    append_detail(&mut lines, &mut groups, group, "Reason", s, inner.width);
+                }
+                for (label, value) in [
+                    ("Name", j.name.as_str()),
+                    ("Command", j.command.as_str()),
+                    ("Nodes", j.nodelist.as_str()),
+                    ("TRES", j.tres.as_str()),
+                ] {
+                    group += 1;
+                    append_detail(&mut lines, &mut groups, group, label, value, inner.width);
+                }
+                let output_label = match self.output_panel_mode {
+                    OutputPanelMode::Stdout => "stdout ",
+                    OutputPanelMode::Stderr => "stderr ",
+                    OutputPanelMode::Workdir => "workdir",
+                    OutputPanelMode::Collapsed => "stdout ",
+                };
+                let output_value = match self.output_panel_mode {
+                    OutputPanelMode::Stdout => j.stdout.as_ref(),
+                    OutputPanelMode::Stderr => j.stderr.as_ref(),
+                    OutputPanelMode::Workdir => self.workdir_path.as_ref(),
+                    OutputPanelMode::Collapsed => j.stdout.as_ref(),
+                }
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
                 group += 1;
                 append_detail(
                     &mut lines,
                     &mut groups,
                     group,
-                    "Start",
-                    &j.start_time,
+                    output_label.trim(),
+                    &output_value,
                     inner.width,
                 );
-            }
-            if let Some(s) = j.reason.as_deref() {
-                group += 1;
-                append_detail(&mut lines, &mut groups, group, "Reason", s, inner.width);
-            }
-            for (label, value) in [
-                ("Name", j.name.as_str()),
-                ("Command", j.command.as_str()),
-                ("Nodes", j.nodelist.as_str()),
-                ("TRES", j.tres.as_str()),
-            ] {
-                group += 1;
-                append_detail(&mut lines, &mut groups, group, label, value, inner.width);
-            }
-            let output_label = match self.output_panel_mode {
-                OutputPanelMode::Stdout => "stdout ",
-                OutputPanelMode::Stderr => "stderr ",
-                OutputPanelMode::Workdir => "workdir",
-                OutputPanelMode::Collapsed => "stdout ",
-            };
-            let output_value = match self.output_panel_mode {
-                OutputPanelMode::Stdout => j.stdout.as_ref(),
-                OutputPanelMode::Stderr => j.stderr.as_ref(),
-                OutputPanelMode::Workdir => self.workdir_path.as_ref(),
-                OutputPanelMode::Collapsed => j.stdout.as_ref(),
-            }
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
-            group += 1;
-            append_detail(
-                &mut lines,
-                &mut groups,
-                group,
-                output_label.trim(),
-                &output_value,
-                inner.width,
-            );
-            (Text::from(lines), groups)
-        });
+                (Text::from(lines), groups)
+            })
+        };
         self.details_selection_rows.clear();
-        let text = if let Some((text, groups)) = job_detail {
+        let text = if let Some((text, groups)) = detail {
             let left = inner.x;
-            let value_x = left.saturating_add(9);
+            let value_x = left.saturating_add(12);
             let right = inner.right().saturating_sub(1);
             self.details_selection_rows = groups
                 .into_iter()
@@ -105,7 +125,7 @@ fn append_detail(
     value: &str,
     width: u16,
 ) {
-    let label_width = 8usize;
+    let label_width = 11usize;
     let value_width = usize::from(width).saturating_sub(label_width + 1).max(1);
     let chunks = if label == "TRES" {
         tres_chunks(value, value_width)

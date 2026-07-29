@@ -210,6 +210,12 @@ impl App {
         self.selected_job().map(Job::id)
     }
 
+    pub(in crate::app) fn selected_resource(&self) -> Option<&PartitionResources> {
+        self.resource_table_state
+            .selected()
+            .and_then(|index| self.resources.get(index))
+    }
+
     pub(in crate::app) fn flush_pending_clipboard_copy(&mut self) -> io::Result<()> {
         if let Some(value) = self.pending_clipboard_copy.take() {
             write_osc52_clipboard(&value)?;

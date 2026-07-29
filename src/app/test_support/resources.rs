@@ -47,6 +47,10 @@ impl From<PartitionResources> for ResourceSnapshot {
             running_nodes: resource.running_nodes,
             group_used_nodes: resource.group_used_nodes,
             available_nodes: resource.available_nodes,
+            cpus_per_node: resource.cpus_per_node,
+            gpus_per_node: resource.gpus_per_node,
+            time_limit: resource.time_limit,
+            memory_per_node: resource.memory_per_node,
         }
     }
 }
@@ -59,6 +63,10 @@ impl From<ResourceSnapshot> for PartitionResources {
             running_nodes: resource.running_nodes,
             group_used_nodes: resource.group_used_nodes,
             available_nodes: resource.available_nodes,
+            cpus_per_node: resource.cpus_per_node,
+            gpus_per_node: resource.gpus_per_node,
+            time_limit: resource.time_limit,
+            memory_per_node: resource.memory_per_node,
         }
     }
 }

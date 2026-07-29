@@ -4,12 +4,12 @@ set -euo pipefail
 
 # Plain format from `sinfo -o '%P %t %D' --noheader`.
 cat <<'EOF'
-A alloc 9
-B alloc 10
-B mix 5
-B idle 7
-B down 1
-B drain 1
-C alloc 21
-C idle 1
+A|alloc|9|64|gpu:2|1-00:00:00|512G
+B|alloc|10|128|(null)|2-00:00:00|1T
+B|mix|5|128|(null)|2-00:00:00|1T
+B|idle|7|128|(null)|2-00:00:00|1T
+B|down|1|128|(null)|2-00:00:00|1T
+B|drain|1|128|(null)|2-00:00:00|1T
+C|alloc|21|32|(null)|3-00:00:00|256G
+C|idle|1|32|(null)|3-00:00:00|256G
 EOF
