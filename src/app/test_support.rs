@@ -85,12 +85,16 @@ pub struct ResourceSnapshot {
 
 pub struct AppDriver {
     app: App,
+    slurm_requests: Receiver<SlurmCommand>,
 }
 
 mod driver;
 mod fixtures;
 mod jobs;
 mod resources;
+
+#[cfg(test)]
+mod slurm_tests;
 
 pub use fixtures::*;
 pub use jobs::*;

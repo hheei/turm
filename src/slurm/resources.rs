@@ -1,84 +1,26 @@
+use super::SlurmClient;
+use crate::app::PartitionResources;
 use std::collections::BTreeMap;
 use std::process::Command;
-use std::thread;
-use std::time::Duration;
-
-use crossbeam::channel::Sender;
-
-use crate::app::AppMessage;
-use crate::app::PartitionResources;
-use crate::squeue_args::primary_group;
-
-struct ResourceWatcher {
-    app: Sender<AppMessage>,
-    interval: Duration,
-}
-
-pub struct ResourceWatcherHandle {}
-
-impl ResourceWatcher {
-    fn new(app: Sender<AppMessage>, interval: Duration) -> Self {
-        Self { app, interval }
-    }
-
-    fn run(&mut self) {
-        loop {
-            let result = fetch_resources();
-            match result {
-                Ok(resources) => {
-                    let _ = self.app.send(AppMessage::ResourcesUpdated(resources));
-                }
-                Err(err) => {
-                    let _ = self
-                        .app
-                        .send(AppMessage::ResourceWatcherError(err.to_string()));
-                }
-            }
-            thread::sleep(self.interval);
-        }
-    }
-}
-
-impl ResourceWatcherHandle {
-    pub fn new(app: Sender<AppMessage>, interval: Duration) -> Self {
-        let mut watcher = ResourceWatcher::new(app, interval);
-        thread::spawn(move || watcher.run());
-        Self {}
-    }
-}
 
 // ── sinfo fetching ──
 
 /// Runs `sinfo` and returns parsed partition resources.
-pub(crate) fn fetch_resources() -> Result<Vec<PartitionResources>, Box<dyn std::error::Error>> {
-    fetch_resources_with("sinfo", "squeue")
-}
-
-pub(crate) fn fetch_resources_with(
-    sinfo: impl AsRef<std::ffi::OsStr>,
-    squeue: impl AsRef<std::ffi::OsStr>,
-) -> Result<Vec<PartitionResources>, Box<dyn std::error::Error>> {
-    let sinfo = sinfo.as_ref();
-    let output = Command::new(sinfo)
-        .args(["-o", "%P|%t|%D|%c|%G|%l|%m", "--noheader"])
-        .output()?;
-    if !output.status.success() {
-        return Err("sinfo command failed".into());
-    }
-    let mut resources = parse_sinfo_plain(&String::from_utf8_lossy(&output.stdout));
-    let group = primary_group().ok_or("failed to determine primary group")?;
-    let output = Command::new(squeue)
-        .args([
+pub(crate) fn fetch_resources(client: &SlurmClient) -> Result<Vec<PartitionResources>, String> {
+    let output = client
+        .output(Command::new(&client.sinfo).args(["-o", "%P|%t|%D|%c|%G|%l|%m", "--noheader"]))
+        .map_err(|error| error.to_string())?;
+    let mut resources = parse_sinfo_plain(&output);
+    let group = client.primary_group()?;
+    let output = client
+        .output(Command::new(&client.squeue).args([
             "--noheader",
             "--states=RUNNING",
             &format!("--accounts={group}"),
             "--format=%P|%D",
-        ])
-        .output()?;
-    if !output.status.success() {
-        return Err("squeue command failed".into());
-    }
-    let group_usage = parse_group_usage(&String::from_utf8_lossy(&output.stdout));
+        ]))
+        .map_err(|error| error.to_string())?;
+    let group_usage = parse_group_usage(&output);
     for resource in &mut resources {
         resource.group_used_nodes = group_usage
             .get(&resource.partition)
@@ -87,6 +29,16 @@ pub(crate) fn fetch_resources_with(
             .min(resource.running_nodes);
     }
     Ok(sort_resources(resources))
+}
+
+pub(crate) fn fetch_resources_with(
+    sinfo: impl AsRef<std::ffi::OsStr>,
+    squeue: impl AsRef<std::ffi::OsStr>,
+) -> Result<Vec<PartitionResources>, String> {
+    let mut client = SlurmClient::default();
+    client.sinfo = sinfo.as_ref().into();
+    client.squeue = squeue.as_ref().into();
+    fetch_resources(&client)
 }
 
 /// Sort resources: total nodes descending, then available nodes descending.

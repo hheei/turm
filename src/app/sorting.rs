@@ -43,7 +43,6 @@ impl App {
     pub(super) fn sort_jobs(&mut self) {
         let sort_field = self.job_sort_field;
         let sort_direction = self.job_sort_direction;
-
         self.jobs.sort_by(|left, right| {
             let terminal_order = left.is_terminal().cmp(&right.is_terminal());
             let missing_start_time_order = (sort_field == JobSortField::Time).then(|| {
@@ -59,6 +58,7 @@ impl App {
                     SortDirection::Desc => ordering.reverse(),
                 })
         });
+        self.invalidate_visible_job_cache();
     }
 
     pub(super) fn restore_selection_by_job_id(
@@ -66,7 +66,7 @@ impl App {
         selected_id: Option<String>,
         fallback_index: Option<usize>,
     ) {
-        let visible_job_indices = self.visible_job_indices();
+        let visible_job_indices = self.visible_job_indices().clone();
         if visible_job_indices.is_empty() {
             self.job_list_state.select(None);
             return;
@@ -109,7 +109,7 @@ fn compare_job_identity(left: &Job, right: &Job) -> Ordering {
         .then_with(|| {
             compare_optional_numeric_string(left.array_step.as_deref(), right.array_step.as_deref())
         })
-        .then_with(|| cmp_ignore_ascii_case(&left.id(), &right.id()))
+        .then_with(|| cmp_ignore_ascii_case(left.id(), right.id()))
 }
 
 fn compare_job_start_time(left: &Job, right: &Job) -> Ordering {
@@ -120,11 +120,14 @@ fn compare_job_start_time(left: &Job, right: &Job) -> Ordering {
 }
 
 fn compare_job_duration(left: &Job, right: &Job) -> Ordering {
-    compare_optional_u64(
-        parse_slurm_duration(&left.time),
-        parse_slurm_duration(&right.time),
-    )
-    .then_with(|| cmp_ignore_ascii_case(&left.time, &right.time))
+    let left_duration = left
+        .duration_seconds
+        .or_else(|| parse_slurm_duration(&left.time));
+    let right_duration = right
+        .duration_seconds
+        .or_else(|| parse_slurm_duration(&right.time));
+    compare_optional_u64(left_duration, right_duration)
+        .then_with(|| cmp_ignore_ascii_case(&left.time, &right.time))
 }
 
 fn normalized_start_time(value: &str) -> Option<&str> {
@@ -166,12 +169,16 @@ fn compare_optional_u64(left: Option<u64>, right: Option<u64>) -> Ordering {
     }
 }
 
+fn cmp_ignore_ascii_case(left: &str, right: &str) -> Ordering {
+    left.bytes()
+        .map(|byte| byte.to_ascii_lowercase())
+        .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
+}
 fn parse_slurm_duration(value: &str) -> Option<u64> {
     let (days, rest) = match value.split_once('-') {
         Some((days, rest)) => (days.parse::<u64>().ok()?, rest),
         None => (0, value),
     };
-
     let mut parts = rest.split(':');
     let first = parts.next()?;
     let second = parts.next()?;
@@ -179,7 +186,6 @@ fn parse_slurm_duration(value: &str) -> Option<u64> {
     if parts.next().is_some() {
         return None;
     }
-
     let (hours, minutes, seconds) = match third {
         Some(seconds) => (
             first.parse::<u64>().ok()?,
@@ -188,12 +194,5 @@ fn parse_slurm_duration(value: &str) -> Option<u64> {
         ),
         None => (0, first.parse::<u64>().ok()?, second.parse::<u64>().ok()?),
     };
-
     Some(days * 86_400 + hours * 3_600 + minutes * 60 + seconds)
-}
-
-fn cmp_ignore_ascii_case(left: &str, right: &str) -> Ordering {
-    left.bytes()
-        .map(|byte| byte.to_ascii_lowercase())
-        .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
 }

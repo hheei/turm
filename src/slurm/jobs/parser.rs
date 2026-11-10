@@ -8,20 +8,62 @@ const FIELD_COUNT: usize = 16;
 const SLURM_NO_ARRAY_VALUE: &str = "4294967294";
 
 pub(super) fn parse_sacct_jobs(output: &str) -> Vec<Job> {
-    output.lines().filter_map(parse_sacct_job).collect()
+    parse_sacct_jobs_for_user(output, None)
 }
 
-fn parse_sacct_job(line: &str) -> Option<Job> {
+pub(super) fn parse_sacct_jobs_for_user(output: &str, user: Option<&str>) -> Vec<Job> {
+    output
+        .lines()
+        .filter_map(|line| parse_sacct_job(line, user))
+        .collect()
+}
+
+fn parse_sacct_job(line: &str, filter_user: Option<&str>) -> Option<Job> {
     let parts = line.trim().splitn(FIELD_COUNT, '|').collect::<Vec<_>>();
+    parse_job_fields(&parts, filter_user)
+}
+
+pub(super) fn parse_squeue_jobs(output: &str) -> Result<Vec<Job>, String> {
+    output
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            let parts = line.trim().split(super::SEPARATOR).collect::<Vec<_>>();
+            if parts.len() != FIELD_COUNT + 2 || !parts.last().unwrap().is_empty() {
+                return Err("invalid squeue row: unexpected field count".to_string());
+            }
+            let id = if normalize_optional(parts[2]).is_some() && parts[2] != SLURM_NO_ARRAY_VALUE {
+                format!("{}_{}", parts[1].trim(), parts[2].trim())
+            } else {
+                parts[0].trim().to_string()
+            };
+            let mut fields = vec![id.as_str(), parts[0]];
+            fields.extend_from_slice(&parts[3..parts.len() - 1]);
+            parse_job_fields(&fields, None)
+                .ok_or_else(|| "invalid squeue row: missing job identity".to_string())
+        })
+        .collect()
+}
+
+fn parse_job_fields(parts: &[&str], filter_user: Option<&str>) -> Option<Job> {
     if parts.len() != FIELD_COUNT {
         return None;
     }
 
     let id = nonempty(parts[0]).or_else(|| nonempty(parts[1]))?;
+    let raw_id = nonempty(parts[1]).unwrap_or(id);
     let (job_id, array_id, array_step) = parse_job_id(id);
+    let display_id = match array_step.as_ref() {
+        Some(array_step) => format!("{array_id}_{array_step}"),
+        None => job_id.clone(),
+    };
+    let duration_seconds = parse_slurm_duration(parts[5].trim());
     let state = parts[3].trim();
     let user = parts[4].trim();
     let name = parts[2].trim();
+    if filter_user.is_some_and(|filter_user| is_historical(state) && user != filter_user) {
+        return None;
+    }
     let nodelist = normalize_optional(parts[10]).unwrap_or_default();
     let working_dir = normalize_optional(parts[14]).unwrap_or_default();
     let stdout = normalize_optional(parts[11]).unwrap_or_default();
@@ -31,7 +73,7 @@ fn parse_sacct_job(line: &str) -> Option<Job> {
         stdout,
         &array_id,
         array_task_id,
-        id,
+        raw_id,
         nodelist,
         user,
         name,
@@ -41,7 +83,7 @@ fn parse_sacct_job(line: &str) -> Option<Job> {
         stderr,
         &array_id,
         array_task_id,
-        id,
+        raw_id,
         nodelist,
         user,
         name,
@@ -52,6 +94,8 @@ fn parse_sacct_job(line: &str) -> Option<Job> {
         job_id,
         array_id: array_id.clone(),
         array_step,
+        display_id,
+        duration_seconds,
         name: name.to_string(),
         state: state.to_string(),
         state_compact: compact_state(state),
@@ -122,6 +166,28 @@ fn nonempty(value: &str) -> Option<&str> {
     let value = value.trim();
     (!value.is_empty()).then_some(value)
 }
+fn parse_slurm_duration(value: &str) -> Option<u64> {
+    let (days, rest) = match value.split_once('-') {
+        Some((days, rest)) => (days.parse::<u64>().ok()?, rest),
+        None => (0, value),
+    };
+    let mut parts = rest.split(':');
+    let first = parts.next()?;
+    let second = parts.next()?;
+    let third = parts.next();
+    if parts.next().is_some() {
+        return None;
+    }
+    let (hours, minutes, seconds) = match third {
+        Some(seconds) => (
+            first.parse::<u64>().ok()?,
+            second.parse::<u64>().ok()?,
+            seconds.parse::<u64>().ok()?,
+        ),
+        None => (0, first.parse::<u64>().ok()?, second.parse::<u64>().ok()?),
+    };
+    Some(days * 86_400 + hours * 3_600 + minutes * 60 + seconds)
+}
 
 #[allow(clippy::too_many_arguments)]
 fn resolve_path(
@@ -152,6 +218,9 @@ fn resolve_path(
     } else {
         path.to_string()
     };
+    if !path.contains('%') {
+        return Some(PathBuf::from(working_dir).join(path));
+    }
 
     for capture in RE
         .captures_iter(&path.clone())
@@ -177,3 +246,4 @@ fn resolve_path(
 
     Some(PathBuf::from(working_dir).join(path))
 }
+use super::is_historical;

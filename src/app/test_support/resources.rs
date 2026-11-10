@@ -1,21 +1,21 @@
 use super::*;
 
 pub fn parse_sinfo_json(value: &serde_json::Value) -> Vec<ResourceSnapshot> {
-    crate::resource_watcher::parse_sinfo_resources(value)
+    crate::slurm::resources::parse_sinfo_resources(value)
         .into_iter()
         .map(ResourceSnapshot::from)
         .collect()
 }
 
 pub fn parse_sinfo_text(value: &str) -> Vec<ResourceSnapshot> {
-    crate::resource_watcher::parse_sinfo_plain(value)
+    crate::slurm::resources::parse_sinfo_plain(value)
         .into_iter()
         .map(ResourceSnapshot::from)
         .collect()
 }
 
 pub fn sort_resource_snapshots(resources: Vec<ResourceSnapshot>) -> Vec<ResourceSnapshot> {
-    crate::resource_watcher::sort_resources(
+    crate::slurm::resources::sort_resources(
         resources
             .into_iter()
             .map(PartitionResources::from)
@@ -27,14 +27,14 @@ pub fn sort_resource_snapshots(resources: Vec<ResourceSnapshot>) -> Vec<Resource
 }
 
 pub fn parse_group_usage_text(value: &str) -> Vec<(String, u32)> {
-    crate::resource_watcher::parse_group_usage(value)
+    crate::slurm::resources::parse_group_usage(value)
         .into_iter()
         .collect()
 }
 
 pub fn fetch_resources_from(sinfo: &Path) -> Result<Vec<ResourceSnapshot>, String> {
     let squeue = sinfo.with_file_name("squeue");
-    crate::resource_watcher::fetch_resources_with(sinfo, squeue)
+    crate::slurm::resources::fetch_resources_with(sinfo, squeue)
         .map(|resources| resources.into_iter().map(ResourceSnapshot::from).collect())
         .map_err(|error| error.to_string())
 }

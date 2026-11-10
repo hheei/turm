@@ -1,20 +1,25 @@
 use super::*;
+use std::cell::RefCell;
 
 impl AppDriver {
     pub fn new(job_count: usize, selected: Option<usize>) -> Self {
         let (app_sender, receiver) = unbounded();
         let (_input_sender, input_receiver) = unbounded();
         let jobs = (0..job_count).map(test_job).collect();
+        let (slurm, slurm_requests) = SlurmHandle::recording();
 
         Self {
+            slurm_requests,
             app: App {
                 focus: Focus::Jobs,
                 dialog: None,
                 jobs,
                 active_filter: String::new(),
-                job_list_state: TableState::new().with_selected(selected),
+                visible_job_cache: RefCell::new(None),
+                jobs_generation: 0,
                 job_sort_field: JobSortField::Time,
                 job_sort_direction: SortDirection::Desc,
+                job_list_state: TableState::new().with_selected(selected),
                 job_output: Ok(String::new()),
                 job_output_anchor: ScrollAnchor::Bottom,
                 job_output_offset: 0,
@@ -25,8 +30,9 @@ impl AppDriver {
                 workdir_error: None,
                 workdir_selected: None,
                 workdir_offset: 0,
-                _job_watcher: JobWatcherHandle {},
-                _resource_watcher: ResourceWatcherHandle {},
+                slurm,
+                job_snapshots: JobSnapshots::default(),
+                command_failures: Default::default(),
                 job_output_watcher: FileWatcherHandle::new(app_sender, Duration::from_secs(60)),
                 receiver,
                 input_receiver,
@@ -69,6 +75,10 @@ impl AppDriver {
 
     pub fn handle(&mut self, message: AppMessage) {
         self.app.handle(message);
+    }
+
+    pub fn pending_slurm_request_count(&self) -> usize {
+        self.slurm_requests.len()
     }
 
     pub fn snapshot(&self) -> AppSnapshot {
@@ -132,7 +142,18 @@ impl AppDriver {
     }
 
     pub fn jobs_mut(&mut self) -> &mut [Job] {
+        self.app.invalidate_visible_job_cache();
         &mut self.app.jobs
+    }
+
+    pub fn refresh_job_derived_fields(&mut self) {
+        for job in &mut self.app.jobs {
+            job.display_id = match job.array_step.as_ref() {
+                Some(step) => format!("{}_{}", job.array_id, step),
+                None => job.job_id.clone(),
+            };
+        }
+        self.app.invalidate_visible_job_cache();
     }
 
     pub fn active_filter(&self) -> &str {
@@ -158,13 +179,18 @@ impl AppDriver {
     pub fn visible_job_ids(&self) -> Vec<String> {
         self.app
             .visible_job_indices()
-            .into_iter()
-            .map(|index| self.app.jobs[index].id())
+            .iter()
+            .copied()
+            .map(|index| self.app.jobs[index].id().to_string())
             .collect()
     }
 
     pub fn job_ids(&self) -> Vec<String> {
-        self.app.jobs.iter().map(Job::id).collect()
+        self.app
+            .jobs
+            .iter()
+            .map(|job| job.id().to_string())
+            .collect()
     }
 
     pub fn sort_field(&self) -> TestJobSortField {

@@ -1,7 +1,6 @@
 mod app;
 mod file_watcher;
-mod job_watcher;
-mod resource_watcher;
+mod slurm;
 mod squeue_args;
 
 pub use app::{

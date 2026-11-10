@@ -1,5 +1,6 @@
 #[allow(private_interfaces)]
 pub enum AppMessage {
+    Slurm(SlurmEvent),
     Jobs(Vec<Job>),
     JobOutput(Result<String, FileWatcherError>),
     ResourcesUpdated(Vec<PartitionResources>),

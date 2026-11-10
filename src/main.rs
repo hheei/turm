@@ -34,6 +34,10 @@ struct Cli {
     #[arg(long, value_name = "SECONDS", default_value_t = 2)]
     slurm_refresh: u64,
 
+    /// Refresh interval for accounting history (seconds).
+    #[arg(long, value_name = "SECONDS", default_value_t = 60)]
+    history_refresh: u64,
+
     /// Refresh rate for the file watcher.
     #[arg(long, value_name = "SECONDS", default_value_t = 2)]
     file_refresh: u64,
@@ -139,9 +143,10 @@ fn input_loop(tx: Sender<std::io::Result<Event>>, stop: Arc<AtomicBool>) {
 fn run_app(args: Cli) -> io::Result<()> {
     let (input_tx, input_rx) = unbounded();
     let cwd_file = args.cwd_file;
-    let mut app = App::new(
+    let mut app = App::with_history_refresh(
         input_rx,
         args.slurm_refresh,
+        args.history_refresh,
         args.file_refresh,
         args.squeue_args.to_vec(),
     );

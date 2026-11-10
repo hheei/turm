@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Focus {
     Resources,
@@ -41,11 +43,6 @@ pub enum Dialog {
 pub enum ConfirmCancelChoice {
     No,
     Yes,
-}
-
-pub(in crate::app) struct CommandFailure {
-    pub(in crate::app) command: String,
-    pub(in crate::app) output: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -197,6 +194,8 @@ pub struct App {
     pub(in crate::app) dialog: Option<Dialog>,
     pub(in crate::app) jobs: Vec<Job>,
     pub(in crate::app) active_filter: String,
+    pub(in crate::app) visible_job_cache: RefCell<Option<(String, u64, Vec<usize>)>>,
+    pub(in crate::app) jobs_generation: u64,
     pub(in crate::app) job_list_state: TableState,
     pub(in crate::app) job_sort_field: JobSortField,
     pub(in crate::app) job_sort_direction: SortDirection,
@@ -210,8 +209,9 @@ pub struct App {
     pub(in crate::app) workdir_error: Option<String>,
     pub(in crate::app) workdir_selected: Option<usize>,
     pub(in crate::app) workdir_offset: usize,
-    pub(in crate::app) _job_watcher: JobWatcherHandle,
-    pub(in crate::app) _resource_watcher: ResourceWatcherHandle,
+    pub(in crate::app) slurm: SlurmHandle,
+    pub(in crate::app) job_snapshots: JobSnapshots,
+    pub(in crate::app) command_failures: std::collections::VecDeque<CommandFailure>,
     pub(in crate::app) job_output_watcher: FileWatcherHandle,
     // sender: Sender<AppMessage>,
     pub(in crate::app) receiver: Receiver<AppMessage>,
@@ -249,10 +249,13 @@ pub(crate) struct PartitionResources {
     pub(crate) memory_per_node: String,
 }
 
+#[derive(Clone)]
 pub struct Job {
     pub job_id: String,
     pub array_id: String,
     pub array_step: Option<String>,
+    pub display_id: String,
+    pub duration_seconds: Option<u64>,
     pub name: String,
     pub state: String,
     pub state_compact: String,
@@ -271,17 +274,16 @@ pub struct Job {
 }
 
 impl Job {
-    pub(in crate::app) fn id(&self) -> String {
-        match self.array_step.as_ref() {
-            Some(array_step) => format!("{}_{}", self.array_id, array_step),
-            None => self.job_id.clone(),
+    pub(crate) fn id(&self) -> &str {
+        if self.array_step.is_none() {
+            &self.job_id
+        } else {
+            &self.display_id
         }
     }
 
     pub(in crate::app) fn is_terminal(&self) -> bool {
-        ["CA", "CD", "F", "OOM", "TO"]
-            .iter()
-            .any(|state| self.state_compact.eq_ignore_ascii_case(state))
+        crate::slurm::jobs::is_historical(&self.state_compact)
     }
 }
 use super::*;

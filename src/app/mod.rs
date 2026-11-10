@@ -7,13 +7,11 @@ use std::{
     cmp::{Ordering, min},
     iter::once,
     path::PathBuf,
-    process::Command,
     time::{Duration, Instant},
 };
 
 use crate::file_watcher::{FileWatcherError, FileWatcherHandle};
-use crate::job_watcher::JobWatcherHandle;
-use crate::resource_watcher::{ResourceWatcherHandle, fetch_resources};
+use crate::slurm::{CommandFailure, JobSnapshots, SlurmCommand, SlurmEvent, SlurmHandle};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use ratatui::{
@@ -43,7 +41,6 @@ pub use core::{
     ScrollAnchor,
 };
 use core::{
-    CommandFailure, DIALOG_WIDTH, DetailsSelectionRow, JobSortField, MouseScrollTarget,
-    MouseSelection, MouseWheelDirection, SelectionArea, SortDirection, WorkdirEntry,
-    WorkdirEntryKind,
+    DIALOG_WIDTH, DetailsSelectionRow, JobSortField, MouseScrollTarget, MouseSelection,
+    MouseWheelDirection, SelectionArea, SortDirection, WorkdirEntry, WorkdirEntryKind,
 };

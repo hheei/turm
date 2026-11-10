@@ -207,7 +207,7 @@ impl App {
     }
 
     pub(in crate::app) fn selected_job_id(&self) -> Option<String> {
-        self.selected_job().map(Job::id)
+        self.selected_job().map(|job| job.id().to_string())
     }
 
     pub(in crate::app) fn selected_resource(&self) -> Option<&PartitionResources> {
@@ -236,7 +236,7 @@ impl App {
     pub(in crate::app) fn cancel_confirmation_dialog(&self) -> Option<Dialog> {
         let job = self.selected_job()?;
         Some(Dialog::ConfirmCancelJob {
-            id: job.id(),
+            id: job.id().to_string(),
             name: job.name.clone(),
             details: selected_job_cancel_details(job),
             signal: None,

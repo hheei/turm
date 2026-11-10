@@ -6,32 +6,31 @@ impl App {
         let previous_output_panel_mode = self.output_panel_mode;
 
         match msg {
+            AppMessage::Slurm(event) => match event {
+                SlurmEvent::Jobs(Ok(snapshot)) => {
+                    let jobs = self.job_snapshots.update(snapshot);
+                    self.replace_jobs(jobs);
+                }
+                SlurmEvent::Resources(Ok(resources)) => self.replace_resources(resources),
+                SlurmEvent::CommandFinished(Err(error)) => self.command_failures.push_back(error),
+                SlurmEvent::Jobs(Err(_))
+                | SlurmEvent::Resources(Err(_))
+                | SlurmEvent::CommandFinished(Ok(())) => {}
+            },
             AppMessage::Jobs(jobs) => {
-                let selected_id = self.selected_job_id();
-                let fallback_index = self.job_list_state.selected();
-
-                self.jobs = jobs;
-                self.sort_jobs();
-                self.restore_selection_by_job_id(selected_id, fallback_index);
+                self.replace_jobs(jobs);
             }
             AppMessage::JobOutput(content) => self.job_output = content,
             AppMessage::ResourcesUpdated(resources) => {
-                let old_offset = self.resource_table_state.offset();
-                self.resources = resources;
-                if old_offset > 0 && old_offset >= self.resources.len().saturating_sub(1) {
-                    self.resource_table_state = TableState::new();
-                }
+                self.replace_resources(resources);
             }
             AppMessage::ResourceWatcherError(_) => {}
             AppMessage::Key(key) => {
                 if self.dialog.is_some() {
                     let mut close_dialog = false;
-                    let mut scancel_request = None;
-                    let mut timelimit_request = None;
-                    let mut rename_request = None;
+                    let mut slurm_request = None;
                     let mut filter_to_apply = None;
                     let mut clipboard_copy = None;
-                    let mut command_failure = None;
 
                     match self.dialog.as_mut().expect("dialog must exist") {
                         Dialog::ConfirmCancelJob {
@@ -41,7 +40,10 @@ impl App {
                             ..
                         } => match cancel_confirmation_action(key, *selected) {
                             CancelConfirmationAction::Confirm => {
-                                scancel_request = Some((id.clone(), signal.as_deref()));
+                                slurm_request = Some(SlurmCommand::Cancel {
+                                    id: id.clone(),
+                                    signal: signal.clone(),
+                                });
                                 close_dialog = true;
                             }
                             CancelConfirmationAction::Cancel => {
@@ -55,7 +57,10 @@ impl App {
                         Dialog::EditTimeLimit { id, input, .. } => match key.code {
                             KeyCode::Enter => {
                                 if let Some(time_limit) = validated_time_limit(input) {
-                                    timelimit_request = Some((id.clone(), time_limit));
+                                    slurm_request = Some(SlurmCommand::SetTimeLimit {
+                                        id: id.clone(),
+                                        value: time_limit,
+                                    });
                                     close_dialog = true;
                                 }
                             }
@@ -70,7 +75,10 @@ impl App {
                             KeyCode::Enter => {
                                 let job_name = input.value().trim();
                                 if !job_name.is_empty() {
-                                    rename_request = Some((id.clone(), job_name.to_string()));
+                                    slurm_request = Some(SlurmCommand::Rename {
+                                        id: id.clone(),
+                                        value: job_name.to_string(),
+                                    });
                                     close_dialog = true;
                                 }
                             }
@@ -124,14 +132,10 @@ impl App {
                         },
                     };
 
-                    if let Some((id, signal)) = scancel_request {
-                        command_failure = execute_scancel(&id, signal).err();
-                    }
-                    if let Some((id, time_limit)) = timelimit_request {
-                        command_failure = execute_scontrol_update_timelimit(&id, &time_limit).err();
-                    }
-                    if let Some((id, job_name)) = rename_request {
-                        command_failure = execute_scontrol_update_job_name(&id, &job_name).err();
+                    if let Some(request) = slurm_request {
+                        if let Err(error) = self.slurm.submit(request) {
+                            self.command_failures.push_back(error);
+                        }
                     }
                     if let Some(filter) = filter_to_apply {
                         self.apply_job_filter(&filter);
@@ -139,9 +143,7 @@ impl App {
                     if let Some(copy_value) = clipboard_copy {
                         self.pending_clipboard_copy = Some(copy_value);
                     }
-                    if let Some(CommandFailure { command, output }) = command_failure {
-                        self.dialog = Some(Dialog::CommandError { command, output });
-                    } else if close_dialog {
+                    if close_dialog {
                         self.dialog = None;
                     }
                 } else {
@@ -305,7 +307,7 @@ impl App {
                         {
                             if let Some(job) = self.selected_job() {
                                 self.dialog = Some(Dialog::EditJobName {
-                                    id: job.id(),
+                                    id: job.id().to_string(),
                                     original_name: job.name.clone(),
                                     input: Input::new(String::new()),
                                 });
@@ -318,7 +320,7 @@ impl App {
                         {
                             if let Some(job) = self.selected_job() {
                                 self.dialog = Some(Dialog::EditTimeLimit {
-                                    id: job.id(),
+                                    id: job.id().to_string(),
                                     maximum: job.time_limit.clone(),
                                     input: Input::new(String::new()),
                                 });
@@ -381,6 +383,13 @@ impl App {
             }
         }
 
+        // Delayed failures must not replace dialogs opened while a command ran.
+        if self.dialog.is_none() {
+            if let Some(CommandFailure { command, output }) = self.command_failures.pop_front() {
+                self.dialog = Some(Dialog::CommandError { command, output });
+            }
+        }
+
         if self.output_panel_mode.is_collapsed() && matches!(self.focus, Focus::Log) {
             self.focus = Focus::Jobs;
         }
@@ -411,5 +420,22 @@ impl App {
             self.selected_job()
                 .and_then(|job| watched_output_path(job, self.output_panel_mode)),
         );
+    }
+
+    fn replace_jobs(&mut self, jobs: Vec<Job>) {
+        let selected_id = self.selected_job_id();
+        let fallback_index = self.job_list_state.selected();
+        self.jobs = jobs;
+        self.invalidate_visible_job_cache();
+        self.sort_jobs();
+        self.restore_selection_by_job_id(selected_id, fallback_index);
+    }
+
+    fn replace_resources(&mut self, resources: Vec<PartitionResources>) {
+        let old_offset = self.resource_table_state.offset();
+        self.resources = resources;
+        if old_offset > 0 && old_offset >= self.resources.len().saturating_sub(1) {
+            self.resource_table_state = TableState::new();
+        }
     }
 }

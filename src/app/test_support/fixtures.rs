@@ -1,10 +1,13 @@
 use super::*;
 
 pub fn test_job(index: usize) -> Job {
+    let job_id = format!("{}", 1000 + index);
     Job {
-        job_id: format!("{}", 1000 + index),
-        array_id: format!("{}", 1000 + index),
+        job_id: job_id.clone(),
+        array_id: job_id.clone(),
         array_step: None,
+        display_id: job_id,
+        duration_seconds: None,
         name: format!("job-{index}"),
         state: "RUNNING".to_string(),
         state_compact: "R".to_string(),

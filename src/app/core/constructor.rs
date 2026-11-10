@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 impl App {
     pub fn new(
         input_receiver: Receiver<std::io::Result<Event>>,
@@ -5,21 +6,45 @@ impl App {
         file_refresh_rate: u64,
         squeue_args: Vec<String>,
     ) -> App {
+        Self::with_history_refresh(
+            input_receiver,
+            slurm_refresh_rate,
+            60,
+            file_refresh_rate,
+            squeue_args,
+        )
+    }
+
+    pub fn with_history_refresh(
+        input_receiver: Receiver<std::io::Result<Event>>,
+        slurm_refresh_rate: u64,
+        history_refresh_rate: u64,
+        file_refresh_rate: u64,
+        squeue_args: Vec<String>,
+    ) -> App {
         let (sender, receiver) = unbounded();
+        let queries = crate::slurm::jobs::JobQueries::new(
+            &squeue_args,
+            std::env::var("USER").ok().as_deref(),
+        );
+        let job_snapshots = JobSnapshots::new(&queries);
+        let slurm = SlurmHandle::start(
+            sender.clone(),
+            Duration::from_secs(slurm_refresh_rate),
+            Duration::from_secs(history_refresh_rate),
+            queries,
+            crate::slurm::SlurmClient::default(),
+        );
         Self {
             focus: Focus::Jobs,
             dialog: None,
             jobs: Vec::new(),
             active_filter: String::new(),
-            _job_watcher: JobWatcherHandle::new(
-                sender.clone(),
-                Duration::from_secs(slurm_refresh_rate),
-                squeue_args,
-            ),
-            _resource_watcher: ResourceWatcherHandle::new(
-                sender.clone(),
-                Duration::from_secs(slurm_refresh_rate),
-            ),
+            visible_job_cache: RefCell::new(None),
+            jobs_generation: 0,
+            slurm,
+            job_snapshots,
+            command_failures: Default::default(),
             job_list_state: TableState::new(),
             job_sort_field: JobSortField::Time,
             job_sort_direction: SortDirection::Desc,
@@ -58,7 +83,7 @@ impl App {
             resource_table_state: TableState::new(),
             resource_list_height: 0,
             resource_area: Rect::default(),
-            resources: fetch_resources().unwrap_or_default(),
+            resources: Vec::new(),
         }
     }
 }

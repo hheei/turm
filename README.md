@@ -15,6 +15,24 @@ This repository is a fork of [karimknaebel/turm](https://github.com/karimknaebel
 turm --me --states=ALL
 ```
 
+Live jobs use `squeue` and accounting history uses `sacct`, with independent
+background queries. Live jobs and resources refresh every two
+seconds by default, while history refreshes every 60 seconds:
+
+```shell
+turm --slurm-refresh 5 --history-refresh 120
+```
+
+These intervals are delays after a query completes; a slow query does not
+start overlapping copies of itself. All Slurm queries and job operations run
+in the background, so startup and keyboard input do not wait for Slurm.
+In the default account view, live jobs include other users and history is
+limited to your own jobs. While accounting catches up, your jobs that leave
+the queue retain their last known state until history confirms completion.
+
+See [Slurm integration architecture](docs/slurm-architecture.md) for the
+process boundary, worker lifecycle, and snapshot reconciliation rules.
+
 ## Installation
 
 `turm` is available on [PyPI](https://pypi.org/project/turm/), [crates.io](https://crates.io/crates/turm), and [conda-forge](https://github.com/conda-forge/turm-feedstock):
@@ -89,20 +107,25 @@ sq() {
 
 ## How it works
 
-`turm` obtains information about jobs by parsing a single `sacct` query. The query includes allocation records active during the previous two days, so pending, running, completed, failed, and cancelled jobs can share one list. Accounting updates can take a few seconds to appear after a job is submitted.
+`turm` queries live jobs from the controller and terminal history from accounting
+separately, then merges them into one list. Live queries have no two-day cutoff;
+history covers the previous two days. Both CLI responses share the same
+job normalizer. Accounting updates can take a few seconds to appear.
 
 ### Resource usage
 
-TL;DR: `turm` ≈ `watch -n2 sacct` + `tail -f slurm-log.out`
+TL;DR: `turm` ≈ independent live/history polling + `tail -f slurm-log.out`
 
 Special care has been taken to ensure that `turm` is as lightweight as possible in terms of its impact on the Slurm controller and its file I/O operations.
-The job list is updated every two seconds by running `sacct`. By default, active jobs are limited to the current account while historical jobs are limited to the current user; `--me`, `--user`, and `--account` provide explicit scopes.
+Live jobs refresh every two seconds and history every 60 seconds by default.
+By default, active jobs are limited to the current account while historical jobs are limited to the current user; `--me`, `--user`, and `--account` provide explicit scopes.
 `turm` updates the currently displayed log file on every inotify modify notification, and it only reads the newly appended lines after the initial read.
 However, since inotify notifications are not supported for remote file systems, such as NFS, `turm` also polls the file for newly appended bytes every two seconds.
 
 ## Development without Slurm
 
-For local UI testing, this repository includes mocks for `sacct`, `scancel`, and `scontrol`:
+For local UI testing, this repository includes mocks for `squeue`, `sacct`,
+`sinfo`, `scancel`, and `scontrol`:
 
 ```shell
 PATH=scripts/mock-slurm/bin:$PATH cargo run -- --me
