@@ -12,15 +12,32 @@ pub(super) fn parse_sacct_jobs(output: &str) -> Vec<Job> {
 }
 
 pub(super) fn parse_sacct_jobs_for_user(output: &str, user: Option<&str>) -> Vec<Job> {
-    output
-        .lines()
-        .filter_map(|line| parse_sacct_job(line, user))
-        .collect()
+    parse_sacct_jobs_with_columns(
+        output,
+        user,
+        &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    )
 }
 
-fn parse_sacct_job(line: &str, filter_user: Option<&str>) -> Option<Job> {
-    let parts = line.trim().splitn(FIELD_COUNT, '|').collect::<Vec<_>>();
-    parse_job_fields(&parts, filter_user)
+pub(super) fn parse_sacct_jobs_with_columns(
+    output: &str,
+    user: Option<&str>,
+    columns: &[usize],
+) -> Vec<Job> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let values = line.trim().splitn(columns.len(), '|').collect::<Vec<_>>();
+            if values.len() != columns.len() {
+                return None;
+            }
+            let mut fields = [""; FIELD_COUNT];
+            for (&column, value) in columns.iter().zip(values) {
+                fields[column] = value;
+            }
+            parse_job_fields(&fields, user)
+        })
+        .collect()
 }
 
 pub(super) fn parse_squeue_jobs(output: &str) -> Result<Vec<Job>, String> {

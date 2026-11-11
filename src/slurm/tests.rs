@@ -307,10 +307,17 @@ mod processes {
                     .unwrap()
                     .success()
             );
+            let probe = if program == "sacct" {
+                "if [ \"${1:-}\" = --helpformat ]; then\n\
+                 printf '%s\\n' 'JobID JobIDRaw JobName State User Elapsed Timelimit Start AllocTRES Partition NodeList Stdout Stderr Reason WorkDir Command'\n\
+                 exit 0\nfi\n"
+            } else {
+                ""
+            };
             self.script(
                 program,
                 &format!(
-                    "printf ready > '{}'\nread -r token < '{}'\nexit 0",
+                    "{probe}printf ready > '{}'\nread -r token < '{}'\nexit 0",
                     start.display(),
                     release.display()
                 ),
@@ -337,6 +344,70 @@ mod processes {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn accounting_uses_supported_fields_and_caches_the_schema() {
+        let fixture = Fixture::new();
+        let probes = fixture.0.join("probes");
+        let arguments = fixture.0.join("arguments");
+        fixture.script(
+            "sacct",
+            &format!(
+                "if [ \"${{1:-}}\" = --helpformat ]; then\n\
+                 printf 'probe\\n' >> '{}'\n\
+                 printf '%s\\n' 'JobID JobIDRaw JobName State User Elapsed Timelimit Start AllocTRES Partition NodeList Reason WorkDir'\n\
+                 exit 0\nfi\n\
+                 printf '%s\\n' \"$@\" > '{}'\n\
+                 printf '%s\\n' '43|43|finished|COMPLETED|alex|00:01:05|01:00:00|2026-11-11T10:00:00|cpu=4|debug|node01|None|/work/alex'",
+                probes.display(),
+                arguments.display(),
+            ),
+        );
+        let client = SlurmClient::in_directory(&fixture.0);
+        for _ in 0..2 {
+            let jobs = jobs::fetch_history(&client, &args(&["--user=alex"])).unwrap();
+            assert_eq!(jobs.len(), 1);
+            assert_eq!(jobs[0].id(), "43");
+            assert_eq!(jobs[0].duration_seconds, Some(65));
+            assert_eq!(
+                jobs[0].workdir.as_deref(),
+                Some(std::path::Path::new("/work/alex"))
+            );
+            assert_eq!(
+                jobs[0].stdout.as_deref(),
+                Some(std::path::Path::new("/work/alex/slurm-43.out"))
+            );
+            assert_eq!(jobs[0].stderr, jobs[0].stdout);
+            assert_eq!(jobs[0].reason, None);
+            assert!(jobs[0].command.is_empty());
+        }
+        assert_eq!(fs::read_to_string(probes).unwrap(), "probe\n");
+        let arguments = fs::read_to_string(arguments).unwrap();
+        assert!(arguments.contains("--format=JobID,JobIDRaw,JobName,State,User,Elapsed,Timelimit,Start,AllocTRES,Partition,NodeList,Reason,WorkDir"));
+        for absent in ["Stdout", "Stderr", "Command"] {
+            assert!(!arguments.contains(absent));
+        }
+    }
+
+    #[test]
+    fn incomplete_accounting_schema_is_an_error_not_an_empty_snapshot() {
+        let fixture = Fixture::new();
+        let queried = fixture.0.join("queried");
+        fixture.script(
+            "sacct",
+            &format!(
+                "if [ \"${{1:-}}\" = --helpformat ]; then\n\
+                 printf '%s\\n' 'JobID State User'\nexit 0\nfi\n\
+                 touch '{}'",
+                queried.display(),
+            ),
+        );
+        let error = jobs::fetch_history(&SlurmClient::in_directory(&fixture.0), &[])
+            .err()
+            .expect("missing required fields must fail");
+        assert!(error.contains("required field JobIDRaw"));
+        assert!(!queried.exists());
     }
 
     #[test]
@@ -447,6 +518,9 @@ mod processes {
             jobs: live,
         });
         let history = jobs::fetch_history(&client, &queries.history.unwrap()).unwrap();
+        let completed = history.iter().find(|job| job.id() == "1000").unwrap();
+        assert!(completed.command.contains("prepare.py"));
+        assert!(completed.workdir.is_some());
         let merged = store.update(JobSnapshot {
             source: JobSource::History,
             started_at: t,

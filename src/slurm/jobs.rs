@@ -23,6 +23,40 @@ const SACCT_FIELDS: [&str; 16] = [
     "Command",
 ];
 
+/// Accounting schemas vary even within a Slurm release (vendor extensions).
+/// Keep optional metadata out of requests when the installed CLI lacks it.
+pub(super) struct HistoryFormat {
+    columns: Vec<usize>,
+}
+
+impl HistoryFormat {
+    pub(super) fn detect(client: &SlurmClient) -> Result<Self, String> {
+        let help = client
+            .output(Command::new(&client.sacct).arg("--helpformat"))
+            .map_err(|error| error.to_string())?;
+        let mut columns = Vec::new();
+        for (column, field) in SACCT_FIELDS.iter().enumerate() {
+            if help
+                .split_whitespace()
+                .any(|name| name.eq_ignore_ascii_case(field))
+            {
+                columns.push(column);
+            } else if column < 11 {
+                return Err(format!("sacct does not advertise required field {field}"));
+            }
+        }
+        Ok(Self { columns })
+    }
+
+    fn argument(&self) -> String {
+        self.columns
+            .iter()
+            .map(|&column| SACCT_FIELDS[column])
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+}
+
 pub(crate) fn fetch_jobs_with(sacct: &Path, sacct_args: &[String]) -> Result<Vec<Job>, String> {
     let mut client = SlurmClient::in_directory("");
     client.sacct = sacct.into();
@@ -33,6 +67,7 @@ pub(crate) fn fetch_history(
     client: &SlurmClient,
     sacct_args: &[String],
 ) -> Result<Vec<Job>, String> {
+    let format = client.history_format()?;
     let output = client
         .output(
             Command::new(&client.sacct)
@@ -42,7 +77,7 @@ pub(crate) fn fetch_history(
                 .arg("--endtime=now")
                 .arg("--noheader")
                 .arg("--parsable2")
-                .arg(format!("--format={}", SACCT_FIELDS.join(","))),
+                .arg(format!("--format={}", format.argument())),
         )
         .map_err(|error| error.to_string())?;
 
@@ -51,7 +86,8 @@ pub(crate) fn fetch_history(
         .any(|arg| arg == "--allusers")
         .then(|| std::env::var("USER").ok())
         .flatten();
-    let jobs = parser::parse_sacct_jobs_for_user(&output, all_users_user.as_deref());
+    let jobs =
+        parser::parse_sacct_jobs_with_columns(&output, all_users_user.as_deref(), &format.columns);
     if let Some(user) = all_users_user {
         Ok(filter_group_jobs(jobs, &user))
     } else {

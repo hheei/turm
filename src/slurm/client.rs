@@ -11,6 +11,7 @@ pub(crate) struct SlurmClient {
     pub(crate) scancel: PathBuf,
     pub(crate) scontrol: PathBuf,
     group: OnceLock<Option<String>>,
+    history_format: OnceLock<Result<super::jobs::HistoryFormat, String>>,
 }
 
 impl Default for SlurmClient {
@@ -29,7 +30,15 @@ impl SlurmClient {
             scancel: directory.join("scancel"),
             scontrol: directory.join("scontrol"),
             group: OnceLock::new(),
+            history_format: OnceLock::new(),
         }
+    }
+
+    pub(super) fn history_format(&self) -> Result<&super::jobs::HistoryFormat, String> {
+        self.history_format
+            .get_or_init(|| super::jobs::HistoryFormat::detect(self))
+            .as_ref()
+            .map_err(|error| error.clone())
     }
 
     pub(crate) fn primary_group(&self) -> Result<&str, String> {

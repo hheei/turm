@@ -12,6 +12,10 @@ process. Completed work arrives through `AppMessage::Slurm(SlurmEvent)`.
   Input is passed as process arguments, never shell source.
 - `jobs.rs` plans controller/accounting queries and translates their filter
   dialects. Its parser normalizes both formats into the same `Job` model.
+  The client caches the installed `sacct --helpformat` schema on the history
+  worker's first query. Core job fields are required; optional output paths,
+  reason, working directory, and command are requested only when supported.
+  Missing metadata is normalized to empty fields without shifting columns.
 - `resources.rs` fetches and parses resource information. The client's cached
   primary group avoids running `id -gn` on every resource refresh.
 - `runtime.rs` owns independent periodic workers for active jobs, history, and
@@ -34,6 +38,12 @@ terminal states only. State filters select the relevant sources; e.g.
 `SPECIAL_EXIT`/`SE` represents a requeued job held in the controller, not a
 terminal accounting state; it stays on the live source and is never sent to
 `sacct` as a state filter.
+
+Standard Slurm 20.11 does not advertise the `Stdout`, `Stderr`, or `Command`
+accounting fields present in some vendor builds. History queries omit these
+fields instead of failing the whole refresh. When paths are unavailable, the
+normalizer uses the standard Slurm output filename relative to `WorkDir` when
+available; custom historical output paths cannot be recovered from absent data.
 
 The default account view requests other users' live allocations but restricts
 the accounting query to the current user on the server. It does not repeatedly

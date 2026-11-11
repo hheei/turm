@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == --helpformat ]]; then
+    printf '%s\n' 'JobID JobIDRaw JobName State User Elapsed Timelimit Start AllocTRES Partition NodeList Stdout Stderr Reason WorkDir Command'
+    exit 0
+fi
+
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd -- "$script_dir/../../.." && pwd)"
 log_dir="$root_dir/scripts/mock-slurm/logs"
